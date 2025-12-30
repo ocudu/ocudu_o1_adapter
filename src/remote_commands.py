@@ -1,10 +1,4 @@
-#
-# Copyright 2021-2025 Software Radio Systems Limited
-#
-# By using this file, you agree to the terms and conditions set
-# forth in the LICENSE file which can be found at the top level of
-# the distribution.
-#
+# SPDX-License-Identifier: BSD 3-Clause Open MPI variant
 
 """
 This module provides a class `WsRemoteCommands` to handle remote commands via WebSocket.
