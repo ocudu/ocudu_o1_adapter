@@ -1,0 +1,53 @@
+{
+    "event": {
+        "commonEventHeader": {
+            "sourceId": "",
+            "startEpochMicrosec": {{ timeStamp }},
+            "eventId": "{{ eventId }}",
+            "timeZoneOffset": "+00:00",
+            "reportingEntityId": "",
+            "internalHeaderFields": {
+                "collectorTimeStamp": "{{ eventTime }}"
+            },
+            "eventType": "EventType5G",
+            "priority": "Low",
+            "version": "4.1",
+            "nfVendorName": "{{ nfVendorName }}",
+            "reportingEntityName": "{{ reportingEntityName }}",
+            "sequence": 0,
+            "domain": "pnfRegistration",
+            "lastEpochMicrosec": {{ timeStamp }},
+            "eventName": "pnfRegistration_EventType5G",
+            "vesEventListenerVersion": "7.2.1",
+            "sourceName": "PRTNILACQ01M017DEV01",
+            "nfNamingCode": "7DEV"
+        },
+        "pnfRegistrationFields": {
+            "serialNumber": "VENDORB-7DEV-10.10.10.14-7200DEV",
+            "additionalFields": {
+                "protocol": "SSH",
+                "password": "netconf",
+                "oamPort": "830",
+                "betweenAttemptsTimeout": "2000",
+                "keepaliveDelay": "120",
+                "sleep-factor": "1.5",
+                "reconnectOnChangedSchema": "false",
+                "connectionTimeout": "20000",
+                "maxConnectionAttempts": "100",
+                "username": "netconf",
+                "tcpOnly": "false"
+            },
+            "lastServiceDate": "2021-03-26",
+            "unitFamily": "VENDORB-7DEV",
+            "vendorName": "{{ nfVendorName }}",
+            "oamV6IpAddress": "0:0:0:0:0:ffff:a0a:014",
+            "unitType": "7DEV",
+            "macAddress": "02:42:f7:d4:62:ce",
+            "pnfRegistrationFieldsVersion": "2.1",
+            "manufactureDate": "2021-01-16",
+            "modelNumber": "7200DEV",
+            "oamV4IpAddress": "{{ oamV4IpAddress }}",
+            "softwareVersion": "{{ softwareVersion }}"
+        }
+    }
+}

@@ -1,0 +1,16 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<processing-elements xmlns="urn:o-ran:processing-element:1.0">
+  <transport-session-type>ETH-INTERFACE</transport-session-type>
+  <ru-elements>
+    <name>processing-element01</name>
+    <transport-flow>
+      <interface-name>uc-vlan{{ config.vlan }}</interface-name>
+      <eth-flow>
+        <ru-mac-address>{{ config.ru_mac_addr }}</ru-mac-address>
+        <vlan-id>{{ config.vlan }}</vlan-id>
+        <o-du-mac-address>{{ config.du_mac_addr }}</o-du-mac-address>
+      </eth-flow>
+    </transport-flow>
+  </ru-elements>
+</processing-elements>
+</config>

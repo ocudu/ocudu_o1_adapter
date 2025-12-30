@@ -1,0 +1,33 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+  <interface>
+    <name>fronthaul1</name>
+    <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:ethernetCsmacd</type>
+    <l2-mtu xmlns="urn:o-ran:interfaces:1.0">9600</l2-mtu>
+    <vlan-tagging xmlns="urn:o-ran:interfaces:1.0">true</vlan-tagging>
+    <class-of-service xmlns="urn:o-ran:interfaces:1.0">
+      <u-plane-marking>0</u-plane-marking>
+      <c-plane-marking>7</c-plane-marking>
+      <m-plane-marking>2</m-plane-marking>
+      <s-plane-marking>7</s-plane-marking>
+      <other-marking>1</other-marking>
+      <enhanced-uplane-markings>
+        <up-marking-name>default</up-marking-name>
+        <enhanced-marking>0</enhanced-marking>
+      </enhanced-uplane-markings>
+    </class-of-service>
+    <mac-address xmlns="urn:o-ran:interfaces:1.0">{{ interface.ru_mac_addr }}</mac-address>
+    <port-reference xmlns="urn:o-ran:interfaces:1.0">
+      <port-name>fronthaul1</port-name>
+      <port-number>0</port-number>
+    </port-reference>
+  </interface>
+  <interface>
+    <name>uc-vlan{{ interface.vlan }}</name>
+    <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:l2vlan</type>
+    <base-interface xmlns="urn:o-ran:interfaces:1.0">fronthaul1</base-interface>
+    <vlan-id xmlns="urn:o-ran:interfaces:1.0">{{ interface.vlan }}</vlan-id>
+    <mac-address xmlns="urn:o-ran:interfaces:1.0">{{ interface.ru_mac_addr }}</mac-address>
+  </interface>
+</interfaces>
+</config>

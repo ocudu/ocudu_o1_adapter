@@ -1,0 +1,36 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
+    <tx-array-carriers>
+      <name>Tx-Array-Carrier-00</name>
+      <active>{{ config.state }}</active>
+    </tx-array-carriers>
+    <tx-array-carriers>
+      <name>Tx-Array-Carrier-01</name>
+      <active>{{ config.state }}</active>
+    </tx-array-carriers>
+    <tx-array-carriers>
+      <name>Tx-Array-Carrier-02</name>
+      <active>{{ config.state }}</active>
+    </tx-array-carriers>
+    <tx-array-carriers>
+      <name>Tx-Array-Carrier-03</name>
+      <active>{{ config.state }}</active>
+    </tx-array-carriers>
+    <rx-array-carriers>
+      <name>Rx-Array-Carrier-00</name>
+      <active>{{ config.state }}</active>
+    </rx-array-carriers>
+    <rx-array-carriers>
+      <name>Rx-Array-Carrier-01</name>
+      <active>{{ config.state }}</active>
+    </rx-array-carriers>
+    <rx-array-carriers>
+      <name>Rx-Array-Carrier-02</name>
+      <active>{{ config.state }}</active>
+    </rx-array-carriers>
+    <rx-array-carriers>
+      <name>Rx-Array-Carrier-03</name>
+      <active>{{ config.state }}</active>
+    </rx-array-carriers>
+</user-plane-configuration>
+</config>

@@ -1,0 +1,45 @@
+{
+    "event": {
+        "commonEventHeader": {
+            "domain": "{{ domain }}",
+            "eventId": "{{ eventId }}",
+            "eventName": "{{ domain }}_{{ eventType }}_Alarms_{{ alarm }}",
+            "eventType": "{{ eventType }}",
+            "sequence": {{ sequence }},
+            "priority": "{{ priority }}",
+            "reportingEntityId": "",
+            "reportingEntityName": "ManagedElement={{ nodeId }}",
+            "sourceId": "{{ sourceId }}",
+            "sourceName": "{{ sourceName }}",
+            "startEpochMicrosec": {{ timeStamp }},
+            "lastEpochMicrosec": {{ timeStamp }},
+            "nfNamingCode": "{{ nfNamingCode }}",
+            "nfVendorName": "{{ nfVendorName }}",
+            "timeZoneOffset": "+00:00",
+            "version": "4.1",
+            "stndDefinedNamespace": "3GPP-FaultSupervision",
+            "vesEventListenerVersion": "7.2.1"
+        },
+        "stndDefinedFields": {
+            "data": {
+                "href": "href1",
+                "notificationId": {{ notificationId }},
+                "notificationType": "notifyNewAlarm",
+                "eventTime": {{ timeStamp }},
+                "systemDN": "ManagedElement={{ nodeId }}",
+                "alarmId": "{{ alarmId }}",
+                "alarmType": "{{ alarmType }}",
+                "probableCause": "{{ alarm }}",
+                "specificProblem": "{{ alarm }}",
+                "perceivedSeverity": "{{ severity }}",
+                "backedUpStatus": true,
+                "trendIndication": "{{ NO_CHANGE }}",
+                "stateChangeDefinition": [{ "operational-state": "DISABLED" }],
+                "proposedRepairActions": "Add more units",
+                "additionalText": "srs",
+                "rootCauseIndicator": false
+            },
+            "stndDefinedFieldsVersion": "1.0"
+        }
+    }
+}

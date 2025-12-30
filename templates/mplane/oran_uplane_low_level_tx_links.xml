@@ -1,0 +1,28 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
+    <low-level-tx-links>
+      <name>Low-Level-Tx-Links-000</name>
+      <processing-element>processing-element01</processing-element>
+      <tx-array-carrier>Tx-Array-Carrier-00</tx-array-carrier>
+      <low-level-tx-endpoint>sep_txch1</low-level-tx-endpoint>
+    </low-level-tx-links>
+    <low-level-tx-links>
+      <name>Low-Level-Tx-Links-001</name>
+      <processing-element>processing-element01</processing-element>
+      <tx-array-carrier>Tx-Array-Carrier-01</tx-array-carrier>
+      <low-level-tx-endpoint>sep_txch2</low-level-tx-endpoint>
+    </low-level-tx-links>
+    <low-level-tx-links>
+      <name>Low-Level-Tx-Links-002</name>
+      <processing-element>processing-element01</processing-element>
+      <tx-array-carrier>Tx-Array-Carrier-02</tx-array-carrier>
+      <low-level-tx-endpoint>sep_txch3</low-level-tx-endpoint>
+    </low-level-tx-links>
+    <low-level-tx-links>
+      <name>Low-Level-Tx-Links-003</name>
+      <processing-element>processing-element01</processing-element>
+      <tx-array-carrier>Tx-Array-Carrier-03</tx-array-carrier>
+      <low-level-tx-endpoint>sep_txch4</low-level-tx-endpoint>
+    </low-level-tx-links>
+</user-plane-configuration>
+</config>

@@ -1,0 +1,237 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<user-plane-configuration
+    xmlns="urn:o-ran:uplane-conf:1.0">
+    <low-level-rx-endpoints>
+        <name>sep_rxch1</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>{{ config.frame_structure }}</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>{{ config.num_prb }}</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>8</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>0</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_rxch2</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>{{ config.frame_structure }}</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>{{ config.num_prb }}</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>8</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>1</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_prach1</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>129</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>12</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>0</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>6</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_prach2</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>129</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>12</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>0</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>7</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_rxch3</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>{{ config.frame_structure }}</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>{{ config.num_prb }}</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>8</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>2</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_rxch4</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>{{ config.frame_structure }}</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>{{ config.num_prb }}</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>8</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>3</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_prach3</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>129</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>12</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>0</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>8</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+    <low-level-rx-endpoints>
+        <name>sep_prach4</name>
+        <compression>
+            <iq-bitwidth>{{ config.iq_bitwidth }}</iq-bitwidth>
+            <compression-type>{{ config.compression_type }}</compression-type>
+            <exponent>4</exponent>
+        </compression>
+        <frame-structure>129</frame-structure>
+        <cp-type>NORMAL</cp-type>
+        <cp-length>88</cp-length>
+        <cp-length-other>72</cp-length-other>
+        <offset-to-absolute-frequency-center>-3276</offset-to-absolute-frequency-center>
+        <number-of-prb-per-scs>
+            <scs>KHZ_30</scs>
+            <number-of-prb>12</number-of-prb>
+        </number-of-prb-per-scs>
+        <ul-fft-sampling-offsets>
+            <scs>KHZ_30</scs>
+            <ul-fft-sampling-offset>0</ul-fft-sampling-offset>
+        </ul-fft-sampling-offsets>
+        <e-axcid>
+            <o-du-port-bitmask>49152</o-du-port-bitmask>
+            <band-sector-bitmask>16128</band-sector-bitmask>
+            <ccid-bitmask>240</ccid-bitmask>
+            <ru-port-bitmask>15</ru-port-bitmask>
+            <eaxc-id>9</eaxc-id>
+        </e-axcid>
+        <non-time-managed-delay-enabled>false</non-time-managed-delay-enabled>
+    </low-level-rx-endpoints>
+</user-plane-configuration>
+</config>

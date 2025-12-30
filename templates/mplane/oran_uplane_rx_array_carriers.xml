@@ -1,0 +1,44 @@
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
+  <rx-array-carriers>
+   <name>Rx-Array-Carrier-00</name>
+   <absolute-frequency-center>{{ config.ul_arfcn }}</absolute-frequency-center>
+   <center-of-channel-bandwidth>{{ config.ul_freq }}</center-of-channel-bandwidth>
+   <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
+   <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
+   <downlink-sfn-offset>0</downlink-sfn-offset>
+   <gain-correction>0.0000</gain-correction>
+   <n-ta-offset>0</n-ta-offset>
+  </rx-array-carriers>
+  <rx-array-carriers>
+    <name>Rx-Array-Carrier-01</name>
+    <absolute-frequency-center>{{ config.ul_arfcn }}</absolute-frequency-center>
+    <center-of-channel-bandwidth>{{ config.ul_freq }}</center-of-channel-bandwidth>
+    <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
+    <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
+    <downlink-sfn-offset>0</downlink-sfn-offset>
+    <gain-correction>0.0000</gain-correction>
+    <n-ta-offset>0</n-ta-offset>
+  </rx-array-carriers>
+  <rx-array-carriers>
+    <name>Rx-Array-Carrier-02</name>
+    <absolute-frequency-center>{{ config.ul_arfcn }}</absolute-frequency-center>
+    <center-of-channel-bandwidth>{{ config.ul_freq }}</center-of-channel-bandwidth>
+    <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
+    <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
+    <downlink-sfn-offset>0</downlink-sfn-offset>
+    <gain-correction>0.0000</gain-correction>
+    <n-ta-offset>0</n-ta-offset>
+  </rx-array-carriers>
+  <rx-array-carriers>
+    <name>Rx-Array-Carrier-03</name>
+    <absolute-frequency-center>{{ config.ul_arfcn }}</absolute-frequency-center>
+    <center-of-channel-bandwidth>{{ config.ul_freq }}</center-of-channel-bandwidth>
+    <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
+    <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
+    <downlink-sfn-offset>0</downlink-sfn-offset>
+    <gain-correction>0.0000</gain-correction>
+    <n-ta-offset>0</n-ta-offset>
+  </rx-array-carriers>
+</user-plane-configuration>
+</config>
