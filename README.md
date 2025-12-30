@@ -1,9 +1,17 @@
-# O1 Adapter
+# OCUDU O1 Adapter
 
 ## Overview
 
-Basic Python-based application that acts as an O1 adapter for srsRAN.
-In a k8s deployment it's supposed to be running as a sidecar container to the e.g. srsRAN DU to control the config file generation/provisioning and livecycle of the Pod through a shared volume and REST-based API, respectivly.
+Python application acting as adapter between CU/DU towards the Service Management and Orchestration (SMO).
+The application currently supports:
+* Configuration Management (CM),
+* Fault Management (FM).
+
+Performance Managment (PM) is currently implemented through a Json-based metrics service exposed over the
+Websocket interface of OCUDU.
+
+In a Kubernetes deployment the O1-Adapter is supposed to be running as a sidecar container next to the e.g.
+OCDUD DU container to control the config file generation/provisioning and livecycle of the Pod through a shared volume and REST-based API, respectivly.
 
 ## Installation
 
@@ -11,7 +19,7 @@ Using `requirements.txt` or on Ubuntu with `sudo apt-get install python3-ncclien
 
 ## Operation
 
-Upon start the application attempts to connect to a Config datastore over ssh/netconf. If it succeeds an initial configuration file will be genereated using the `running` datastore.
+Upon start the application attempts to connect to a Config datastore over SSH/netconf. If it succeeds an initial configuration file will be genereated using the `running` datastore.
 
 ## Manual Execution
 
@@ -37,14 +45,27 @@ An example Docker and k8s integration is provided.
 
 ## RU controller
 
-The RU controller is a stand-alone application to configure O-RU over Mplane. Taking the VVDN LPDU as example
-we can retrieve the current RU config with:
-`$ ./ru_controller.py --host=10.12.1.221 -u root -p vvdn -d running --get_config`
+The RU controller is (currently) a stand-alone application to configure an O-RU over Mplane.
+Taking an example RU that exposes it's Netconf interface over `10.10.0.100` using `admin/admin` as login credentials for example, we can retrieve the current RU config with:
+
+```
+$ ./ru_controller.py --host=10.10.0.100 -u admin -p admin -d running --get_config
+```
 
 We can activate the carrier with:
-`$ ./ru_controller.py --host=10.12.1.221 -u root -p vvdn -d running --tx_gain=26.0 --activate_carriers --carrier_state ACTIVE`
+
+```
+$ ./ru_controller.py --host=10.10.0.100 -u admin -p admin -d running --tx_gain=26.0 --activate_carriers --carrier_state ACTIVE
+```
 
 Run a full RU configuration with:
-`$ ./ru_controller.py --host=10.10.0.97 -u root -p oruadmin -d running --set_full_config --ru_mac_addr=00:a0:0a:01:a4:42 --vlan=127 --du_mac_addr=9c:69:b4:66:cd:48 --iq_bitwidth=9  --compression_type=STATIC --rf_bandwidth_hz=100000000 --dl_arfcn=649980 --dl_freq=3749700000 --tx_gain=39 --ul_arfcn=649980 --ul_freq=3749700000 --carrier_state ACTIVE`
+
+```
+$ ./ru_controller.py --host=10.10.0.100 -u admin -p admin -d running --set_full_config --ru_mac_addr=00:a0:0a:01:a4:42 --vlan=127 --du_mac_addr=9c:69:b4:66:cd:48 --iq_bitwidth=9  --compression_type=STATIC --rf_bandwidth_hz=100000000 --dl_arfcn=649980 --dl_freq=3749700000 --tx_gain=39 --ul_arfcn=649980 --ul_freq=3749700000 --carrier_state ACTIVE
+```
 
 Note: Full configuration has only been verified for a subset of configuration, e.g. with TDD 100MHz, PRACH format B4.
+
+## License
+
+This project is licensed under the BSD 3-Clause Open MPI variant License – see the [LICENSE](./LICENSE) file for details.
