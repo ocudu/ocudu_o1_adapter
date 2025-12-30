@@ -11,4 +11,4 @@ WORKDIR /usr/src/app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["python3", "./o1_adapter.py"]
+CMD ["python3", "./src/o1_adapter.py"]
