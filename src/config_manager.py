@@ -1,5 +1,10 @@
-#!/usr/bin/python3
-# SPDX-License-Identifier: BSD 3-Clause Open MPI variant
+#
+# Copyright 2021-2026 Software Radio Systems Limited
+#
+# By using this file, you agree to the terms and conditions set
+# forth in the LICENSE file which can be found at the top level of
+# the distribution.
+#
 
 """This module provides a ConfigManager class to manage and update the configuration of a gNB / CU / DU."""
 
