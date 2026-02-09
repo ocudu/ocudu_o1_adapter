@@ -44,7 +44,7 @@ class RuConfig:
         self.datastore = datastore
         self.operation = "merge"  # 'merge' or 'replace'
         self.dry_run = self.netconf_manager is None
-        self._jinja_env = Environment(loader=FileSystemLoader("templates/mplane"))
+        self._jinja_env = Environment(loader=FileSystemLoader("../templates/mplane"))
         self._namespaces = {
             "urn:ietf:params:xml:ns:netconf:base:1.0": None,
             "urn:o-ran:uplane-conf:1.0": None,
