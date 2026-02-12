@@ -11,11 +11,13 @@ Performance Managment (PM) is currently implemented through a Json-based metrics
 Websocket interface of OCUDU.
 
 In a Kubernetes deployment the O1-Adapter is supposed to be running as a sidecar container next to the e.g.
-OCDUD DU container to control the config file generation/provisioning and livecycle of the Pod through a shared volume and REST-based API, respectivly.
+OCUDU DU container to control the config file generation/provisioning and livecycle of the Pod through a shared volume and REST-based API, respectively.
 
 ## Installation
 
 Using `requirements.txt` or on Ubuntu with `sudo apt-get install python3-ncclient python3-flask python3-xmltodict`
+
+Within a python virtual environment, install the requirements with `pip install -r requirements.txt`
 
 ## Operation
 
@@ -25,7 +27,7 @@ Upon start the application attempts to connect to a Config datastore over SSH/ne
 
 Make sure a Netconf server is running an can be reached over `localhost` on port `830` (those defaults can be changed over the command line). Run the app in one console:
 
-`$ ./o1_adapter.py`
+`$ python3 src/o1_adapter`
 
 The application will listen on all available network interfaces including `localhost`.
 
