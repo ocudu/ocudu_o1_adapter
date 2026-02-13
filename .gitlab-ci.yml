@@ -41,18 +41,18 @@ stages:
   - ci
   - test
   - build
-  - deploy
+  - publish
 
 headers:
   stage: ci
   extends: .headers
 
 ################################################################################
-# Deploy Docker images
+# Publish Docker images
 ################################################################################
 
-.deploy:
-  stage: deploy
+.publish:
+  stage: publish
   rules:
     - if: $CI_PIPELINE_SCHEDULE_DESCRIPTION =~ /Nightly/
     - if: $ON_MR
@@ -62,7 +62,7 @@ headers:
 o1_adapter image:
   extends:
     - .docker-builder
-    - .deploy
+    - .publish
   variables: &o1-adapter-image-variables
     # CI & Infrastructure
     KUBERNETES_CPU_REQUEST: ${SRS_CPU_LIMIT}
@@ -101,7 +101,7 @@ o1_adapter image:
 o1_adapter image update latest:
   extends:
     - .docker manifest
-    - .deploy
+    - .publish
   variables:
     <<: *o1-adapter-image-variables
 
