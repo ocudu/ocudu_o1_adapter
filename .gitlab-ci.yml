@@ -26,6 +26,9 @@ include:
     file: .gitlab/ci-shared/static.yml
   - project: $[[ inputs.ocudu_path ]]
     ref: $[[ inputs.ocudu_ref ]]
+    file: .gitlab/ci-shared/docker.yml
+  - project: $[[ inputs.ocudu_path ]]
+    ref: $[[ inputs.ocudu_ref ]]
     file: .gitlab/ci-shared/gitlab_settings/.gitlab-ci.yml
     inputs:
       ocudu_path: $[[ inputs.ocudu_path ]]
@@ -38,7 +41,78 @@ stages:
   - ci
   - test
   - build
+  - deploy
 
 headers:
   stage: ci
   extends: .headers
+
+################################################################################
+# Deploy Docker images
+################################################################################
+
+.deploy:
+  stage: deploy
+  rules:
+    - if: $CI_PIPELINE_SCHEDULE_DESCRIPTION =~ /Nightly/
+    - if: $ON_MR
+  retry: 2
+  interruptible: false
+
+o1_adapter image:
+  extends:
+    - .docker-builder
+    - .deploy
+  variables: &o1-adapter-image-variables
+    # CI & Infrastructure
+    KUBERNETES_CPU_REQUEST: ${SRS_CPU_LIMIT}
+    KUBERNETES_CPU_LIMIT: ${SRS_CPU_LIMIT}
+    KUBERNETES_MEMORY_REQUEST: ${SRS_MEMORY_LIMIT}
+    KUBERNETES_MEMORY_LIMIT: ${SRS_MEMORY_LIMIT}
+    # Docker
+    REGISTRY_URI: ${CI_REGISTRY_IMAGE}
+    CONTEXT: ${CI_PROJECT_DIR}
+    MODE: publish
+  tags:
+    - saas-linux-medium-${PLATFORM}
+  before_script:
+    # Set variables
+    - |
+      export NAME="o1_adapter_nightly_${SUFFIX}"
+      export VERSION="$(git show -s --date=format:%Y%m%d --format=%cd ${CI_COMMIT_SHA})_${CI_COMMIT_SHORT_SHA}"
+      echo "CI_SHARED_O1_ADAPTER_IMAGE_VERSION=${VERSION}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+  parallel: &matrix-o1-adapter-image-variants
+    matrix:
+      # AMD
+      - SUFFIX: amd64
+        MARCH: x86-64-v3
+        TAG: amd64
+        PLATFORM: amd64
+      # ARM
+      - SUFFIX: arm64
+        MARCH: armv8.2-a+crypto+fp16+dotprod
+        TAG: arm64
+        PLATFORM: arm64
+  needs: []
+
+o1_adapter image update latest:
+  extends:
+    - .docker manifest
+    - .deploy
+  variables:
+    <<: *o1-adapter-image-variables
+
+  script:
+    - |
+      export NAME="o1_adapter_nightly_${SUFFIX}"
+      export VERSION="${CI_SHARED_O1_ADAPTER_IMAGE_VERSION}"
+      docker manifest create ${REGISTRY_URI}/${NAME}:latest --amend ${REGISTRY_URI}/${NAME}:${VERSION}
+      docker manifest push ${REGISTRY_URI}/${NAME}:latest
+      echo "Image ${RETINA_REGISTRY_URI}/${NAME}:latest pushed"
+  parallel: *matrix-o1-adapter-image-variants
+  needs:
+    - job: o1_adapter image
+      artifacts: true
