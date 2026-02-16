@@ -37,6 +37,7 @@ cu_cp:
     {% endif -%}
     {% endfor %}
 
+{% if ofh_cells %}
 ru_ofh:
   cells:
   {% for dict_item in ofh_cells -%}
@@ -45,6 +46,9 @@ ru_ofh:
       {{key}}: {{ value }}
     {% endfor %}
   {% endfor %}
+{% else %}
+ru_dummy:
+{% endif %}
 
 hal:
 {% for key, value in hal_config.items() %}
