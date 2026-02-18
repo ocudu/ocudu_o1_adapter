@@ -96,8 +96,16 @@ class ConfigManager:
             logging.warning("Failed to send quit command")
             self.state.restart_req = True
         else:
+            # Mark restart requested immediately for health endpoint consumers.
+            self.state.restart_req = True
             logging.info("Waiting for the reboot to complete ..")
-            await asyncio.sleep(1)
+            start_time = asyncio.get_running_loop().time()
+            while not self.state.session_state.get("ws_connected"):
+                if asyncio.get_running_loop().time() - start_time > self._FULL_RESTART_TIMEOUT:
+                    logging.warning("Timed out waiting for WebSocket reconnect")
+                    self.state.restart_req = True
+                    return
+                await asyncio.sleep(1)
 
     def update_runtime_config(self, raw_config, diff):
         """

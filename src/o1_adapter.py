@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import threading
+from contextlib import suppress
 
 import websockets
 from flask import Flask, jsonify
@@ -199,7 +200,11 @@ async def ws_handler(state: AppState, args, alarm_mgr):
     """WebSocket handler main loop."""
     while True:
         try:
-            async with websockets.connect(f"ws://{args.ws_host}:{args.ws_port}") as ws:
+            async with websockets.connect(
+                f"ws://{args.ws_host}:{args.ws_port}",
+                ping_interval=5,
+                ping_timeout=5,
+            ) as ws:
                 logging.info("Connected to WebSocket server")
                 state.session_state["ws_connected"] = True
                 alarm_mgr.clear_alarm(
@@ -220,27 +225,64 @@ async def ws_handler(state: AppState, args, alarm_mgr):
                 async def sender():
                     while True:
                         msg = await state.ws_send_queue.get()
-                        await ws.send(msg)
+                        try:
+                            await ws.send(msg)
+                        except websockets.exceptions.ConnectionClosed:
+                            break
                         logging.debug(f"TXed WS: {msg}")
 
                 # Receiver task: print WS incoming messages
                 async def receiver():
-                    async for msg in ws:
-                        await handle_ws_message(msg)
+                    try:
+                        async for msg in ws:
+                            await handle_ws_message(msg)
+                    except websockets.exceptions.ConnectionClosed:
+                        return
 
-                await asyncio.gather(sender(), receiver())
+                async def keepalive():
+                    while True:
+                        try:
+                            pong_waiter = await ws.ping()
+                            await asyncio.wait_for(pong_waiter, timeout=5)
+                        except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                            break
+                        await asyncio.sleep(5)
+
+                sender_task = asyncio.create_task(sender())
+                receiver_task = asyncio.create_task(receiver())
+                keepalive_task = asyncio.create_task(keepalive())
+
+                done, pending = await asyncio.wait(
+                    [sender_task, receiver_task, keepalive_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                for task in pending:
+                    task.cancel()
+
+                for task in pending:
+                    with suppress(asyncio.CancelledError):
+                        await task
+
+                for task in done:
+                    exc = task.exception()
+                    if exc:
+                        raise exc
 
         except (
             OSError,
             websockets.exceptions.ConnectionClosedError,
+            websockets.exceptions.ConnectionClosedOK,
             websockets.exceptions.InvalidURI,
         ) as e:
             logging.error(f"WS connection error: {e}")
-            state.session_state["ws_connected"] = False
-            alarm_mgr.set_alarm(
-                1002,
-                message="WS connection closed",
-            )
+        finally:
+            if state.session_state.get("ws_connected"):
+                state.session_state["ws_connected"] = False
+                alarm_mgr.set_alarm(
+                    1002,
+                    message="WS connection closed",
+                )
             await asyncio.sleep(RETRY_INTERVAL)
 
 
