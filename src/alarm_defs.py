@@ -24,6 +24,12 @@ class AlarmDefinitions:
             type=AlarmType.COMMUNICATIONS,
             default_severity=AlarmSeverity.CRITICAL,
         ),
+        AlarmDefinition(
+            alarm_id=1003,
+            name="RU_NETCONF_CONNECTION_LOSS",
+            type=AlarmType.COMMUNICATIONS,
+            default_severity=AlarmSeverity.CRITICAL,
+        ),
         # Alarm ID range 2000-2999 reserved for 3GPP alarms
         AlarmDefinition(
             alarm_id=2001,

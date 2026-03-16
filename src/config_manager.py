@@ -35,7 +35,7 @@ class ConfigManager:
     _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio"]
     _FULL_RESTART_TIMEOUT = 30
 
-    def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename):
+    def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename, ru_forward_enabled):
         # execute the base constructor
         self.netconf_manager = netconf_manager
         self.datastore = datastore
@@ -44,12 +44,14 @@ class ConfigManager:
         self.last_config = None
         self.state = state
         self._ws = WsRemoteCommands(state.ws_send_queue)  # Inject shared WS send queue
+        self._ru_forward_enabled = ru_forward_enabled
 
     async def process_config_update(self):
         """
         Retrieve full config
         """
-        raw_config = xmltodict.parse(self.netconf_manager.get_config(source=self.datastore).data_xml)
+        raw_xml = self.netconf_manager.get_config(source=self.datastore).data_xml
+        raw_config = xmltodict.parse(raw_xml)
 
         # Create diff between old and new config
         diff = DeepDiff(self.last_config, raw_config, ignore_order=True)
@@ -84,7 +86,7 @@ class ConfigManager:
             await self._full_restart()
 
         # Write full config to file
-        self.write_full_config(raw_config)
+        self.write_full_config(raw_config, raw_xml)
 
     async def _full_restart(self):
         if not self._ws.send_quit_command():
@@ -181,15 +183,18 @@ class ConfigManager:
         return nc_du_cell_config
 
     # pylint: disable=too-many-locals
-    def write_full_config(self, raw_config):
+    def write_full_config(self, raw_config, raw_xml=None):
         """
         Writes the full configuration to a file based on the provided raw configuration.
 
         Args:
             raw_config (dict): The raw configuration data.
+            raw_xml (str, optional): The raw NETCONF XML payload.
         """
         if raw_config is None:
-            raw_config = xmltodict.parse(self.netconf_manager.get_config(source=self.datastore).data_xml)
+            if raw_xml is None:
+                raw_xml = self.netconf_manager.get_config(source=self.datastore).data_xml
+            raw_config = xmltodict.parse(raw_xml)
 
         logging.debug(f"RAW xml:\n{raw_config}")
 
@@ -242,7 +247,28 @@ class ConfigManager:
             logging.info(f"Generating {self.output_filename}")
             logging.debug(f"Generated config:\n{content}")
 
+        self._enqueue_ru_forward_update(raw_xml)
+
         return True
+
+    def _enqueue_ru_forward_update(self, raw_xml):
+        """Queue latest NETCONF config for RU forwarding."""
+        if not self._ru_forward_enabled or raw_xml is None:
+            return
+
+        dropped = 0
+        while not self.state.ru_update_queue.empty():
+            try:
+                self.state.ru_update_queue.get_nowait()
+                self.state.ru_update_queue.task_done()
+                dropped += 1
+            except asyncio.QueueEmpty:
+                break
+
+        self.state.ru_update_queue.put_nowait(raw_xml)
+        if dropped:
+            logging.debug(f"Dropped {dropped} stale RU forwarding update(s)")
+        logging.debug("Queued RU forwarding update")
 
     def _extract_cucp_config(self, raw_config, du_cells=None, cell_cfg=None):
         cucp_config = {}
