@@ -22,14 +22,11 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
       </enhanced-uplane-markings>
     </class-of-service>
     <mac-address xmlns="urn:o-ran:interfaces:1.0">{{ interface.ru_mac_addr }}</mac-address>
-    <port-reference xmlns="urn:o-ran:interfaces:1.0">
-      <port-name>fronthaul1</port-name>
-      <port-number>0</port-number>
-    </port-reference>
   </interface>
   <interface>
     <name>uc-vlan{{ interface.vlan }}</name>
     <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:l2vlan</type>
+    <enabled>true</enabled>
     <base-interface xmlns="urn:o-ran:interfaces:1.0">fronthaul1</base-interface>
     <vlan-id xmlns="urn:o-ran:interfaces:1.0">{{ interface.vlan }}</vlan-id>
     <mac-address xmlns="urn:o-ran:interfaces:1.0">{{ interface.ru_mac_addr }}</mac-address>

@@ -12,6 +12,7 @@ Usage:
 import argparse
 import logging
 import sys
+from pathlib import Path
 import xml.dom.minidom
 import xml.etree.ElementTree as ET
 from xml.parsers.expat import ExpatError
@@ -38,7 +39,8 @@ class RuConfig:
         self.datastore = datastore
         self.operation = "merge"  # 'merge' or 'replace'
         self.dry_run = self.netconf_manager is None
-        self._jinja_env = Environment(loader=FileSystemLoader("../templates/mplane"))
+        template_dir = Path(__file__).resolve().parent.parent / "templates" / "mplane"
+        self._jinja_env = Environment(loader=FileSystemLoader(str(template_dir)))
         self._namespaces = {
             "urn:ietf:params:xml:ns:netconf:base:1.0": None,
             "urn:o-ran:uplane-conf:1.0": None,
@@ -74,6 +76,7 @@ class RuConfig:
         self.set_oran_uplane_low_level_rx_links()
         # self.set_oran_perf_measurement()
         self.set_oran_uplane_carrier_active(config_dict["activation"])
+        self.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
 
     def _render_template(self, template_name, **kwargs):
         template = self._jinja_env.get_template(template_name)
@@ -128,6 +131,10 @@ class RuConfig:
     def set_oran_uplane_carrier_active(self, active_config):
         """Set ORAN U-plane carrier activation configuration."""
         self._set_config_from_template("oran_uplane_carrier_active.xml", "ORAN Uplane carrier active", active_config)
+
+    def set_oran_uplane_tdd_7d1s2u_slot_6_4_4(self):
+        """Set ORAN U-plane TDD to 7d1s2u."""
+        self._set_config_from_template("oran_uplane_tdd_7d1s2u_slot_6_4_4.xml", "ORAN Uplane configure TDD to 7d1s2u")
 
     def was_operation_successful(self, result):
         """Check if NETCONF operation was successful."""
@@ -358,6 +365,7 @@ if __name__ == "__main__":
         ru_controller.set_oran_uplane_rx_array_carriers(uplane_carrier_config)
         ru_controller.set_oran_uplane_low_level_tx_links()
         ru_controller.set_oran_uplane_low_level_rx_links()
+        ru_controller.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
 
     if args.activate_carriers:
         carrier_activation_config = {"state": args.carrier_state}

@@ -1,0 +1,43 @@
+<!--
+SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+-->
+
+
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <o-ran-uplane-conf:user-plane-configuration xmlns:o-ran-uplane-conf="urn:o-ran:uplane-conf:1.0">
+    <o-ran-uplane-conf:configurable-tdd-patterns>
+      <o-ran-uplane-conf:tdd-pattern-id>1</o-ran-uplane-conf:tdd-pattern-id>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>1</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>GP</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>4564114</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>2</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>UL</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>4739657</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>3</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>DL</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>6144000</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>4</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>GP</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>10708114</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>5</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>UL</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>10883657</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+      <o-ran-uplane-conf:switching-points>
+        <o-ran-uplane-conf:switching-point-id>6</o-ran-uplane-conf:switching-point-id>
+        <o-ran-uplane-conf:direction>DL</o-ran-uplane-conf:direction>
+        <o-ran-uplane-conf:frame-offset>12288000</o-ran-uplane-conf:frame-offset>
+      </o-ran-uplane-conf:switching-points>
+    </o-ran-uplane-conf:configurable-tdd-patterns>
+  </o-ran-uplane-conf:user-plane-configuration>
+</config>
