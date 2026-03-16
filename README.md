@@ -15,7 +15,7 @@ OCUDU DU container to control the config file generation/provisioning and livecy
 
 ## Installation
 
-Using `requirements.txt` or on Ubuntu with `sudo apt-get install python3-ncclient python3-flask python3-xmltodict`
+Using `requirements.txt` or on Ubuntu with `sudo apt-get install python3-ncclient python3-flask python3-xmltodict python3-websockets python3-deepdiff`
 
 Within a python virtual environment, install the requirements with `pip install -r requirements.txt`
 
@@ -45,9 +45,17 @@ To reset the health status send the following command to the server:
 
 An example Docker and k8s integration is provided.
 
+### RU controller within O1 Adapter
+
+With the option `--ru_forward` the O1 Adapter automatically forwards configuration updates from the NETCONF server of the DU to the NETCONF server of the RU. In this case it has to be ensured, that two NETCONF servers are reachable. One represents the NETCONF server on the DU and the other NETCONF server runs on the RU. Then the forwarding can be achieved by the following command:
+
+```
+$ python3 src/o1_adapter.py --netconf_host <DU-IP-ADDRESS> --netconf_username <DU-NETCONF-USERNAME> --netconf_password <DU-USER-PASSWORD> --ru_forward --ru_netconf_host <RU-IP-ADDRESS> --ru_netconf_username <RU-NETCONF-USERNAME> --ru_netconf_password <RU-USER-PASSWORD>
+```
+
 ## RU controller
 
-The RU controller is (currently) a stand-alone application to configure an O-RU over Mplane.
+The RU controller is a stand-alone application to configure an O-RU over Mplane.
 Taking an example RU that exposes it's Netconf interface over `10.10.0.100` using `admin/admin` as login credentials for example, we can retrieve the current RU config with:
 
 ```
