@@ -16,12 +16,9 @@ Usage:
 
 import argparse
 import asyncio
-import copy
-import io
 import json
 import logging
 import threading
-import xml.etree.ElementTree as ET
 from contextlib import suppress
 
 import websockets
@@ -33,7 +30,7 @@ from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
-from ru_controller import RuConfig
+from ru_forwarder import RuForwarder
 from state import AppState
 from ves import VesMessages
 
@@ -42,15 +39,6 @@ app = Flask(__name__)
 
 RETRY_INTERVAL = 5  # seconds
 WORKER_SLEEP_INTERVAL = 5  # seconds
-SYNC_ALLOWED_NAMESPACES = {
-    "urn:ietf:params:xml:ns:netconf:base:1.0",
-    "urn:ietf:params:xml:ns:yang:iana-if-type",
-    "urn:ietf:params:xml:ns:yang:ietf-interfaces",
-    "urn:o-ran:interfaces:1.0",
-    "urn:o-ran:performance-management:1.0",
-    "urn:o-ran:processing-element:1.0",
-    "urn:o-ran:uplane-conf:1.0",
-}
 
 
 # TODO: WS message handler processing
@@ -168,7 +156,7 @@ async def try_connect(args, alarm_mgr):
         return None
 
 
-async def netconf_main(state: AppState, args, alarm_mgr):
+async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
     """
     Main loop for managing the NETCONF connection.
     """
@@ -179,8 +167,8 @@ async def netconf_main(state: AppState, args, alarm_mgr):
             state.session_state["nc_connected"] = True
             stop_event = asyncio.Event()
 
-            if args.ru_forward and not startup_ru_sync_done:
-                await sync_source_netconf_from_ru(netconf_session, args, alarm_mgr)
+            if ru_forwarder and not startup_ru_sync_done:
+                await ru_forwarder.sync_source_netconf_from_ru(netconf_session)
                 startup_ru_sync_done = True
 
             writer = ConfigManager(
@@ -208,209 +196,6 @@ async def netconf_main(state: AppState, args, alarm_mgr):
             await worker
 
         logging.debug(f"Retrying in {RETRY_INTERVAL} seconds...")
-        await asyncio.sleep(RETRY_INTERVAL)
-
-
-def _data_xml_to_edit_config_xml(data_xml, include_namespaces=None):
-    """Convert NETCONF <data> payload to NETCONF edit-config <config> payload."""
-    data_root, prefixed_ns = _parse_data_xml(data_xml)
-    children = list(data_root)
-    if include_namespaces is not None:
-        allowed_namespaces = set(include_namespaces)
-        children = [child for child in children if _extract_xml_namespace(child.tag) in allowed_namespaces]
-
-    if not children:
-        raise ValueError("No top-level config nodes left after filters")
-
-    return _build_edit_config_xml(children, prefixed_ns)
-
-
-def _parse_data_xml(data_xml):
-    """Parse NETCONF payload and return resolved <data> root with prefixed namespaces."""
-    prefixed_ns = {}
-    for _, (prefix, uri) in ET.iterparse(io.StringIO(data_xml), events=("start-ns",)):
-        if prefix and prefix not in prefixed_ns:
-            prefixed_ns[prefix] = uri
-
-    source_root = ET.fromstring(data_xml)
-    source_local_name = source_root.tag.split("}", maxsplit=1)[-1]
-
-    if source_local_name == "data":
-        return source_root, prefixed_ns
-
-    if source_local_name == "rpc-reply":
-        for child in list(source_root):
-            if child.tag.split("}", maxsplit=1)[-1] == "data":
-                return child, prefixed_ns
-        raise ValueError("Expected NETCONF <data> inside <rpc-reply>")
-
-    raise ValueError(f"Expected NETCONF <data> root, got <{source_local_name}>")
-
-
-def _extract_xml_namespace(tag):
-    """Extract namespace URI from ElementTree tag."""
-    if isinstance(tag, str) and tag.startswith("{") and "}" in tag:
-        return tag[1:].split("}", maxsplit=1)[0]
-    return ""
-
-
-def _apply_prefixed_namespaces(root, prefixed_ns):
-    """Attach prefixed namespace declarations to XML root element."""
-    for prefix, uri in prefixed_ns.items():
-        root.set(f"xmlns:{prefix}", uri)
-
-
-def _build_edit_config_xml(children, prefixed_ns):
-    """Build NETCONF <config> payload from top-level child elements."""
-    netconf_ns = "urn:ietf:params:xml:ns:netconf:base:1.0"
-    config_root = ET.Element(f"{{{netconf_ns}}}config")
-    _apply_prefixed_namespaces(config_root, prefixed_ns)
-    for child in children:
-        config_root.append(copy.deepcopy(child))
-    return ET.tostring(config_root, encoding="unicode")
-
-
-async def sync_source_netconf_from_ru(source_session, args, alarm_mgr):
-    """
-    One-time bootstrap: apply RU NETCONF running config to source NETCONF server.
-    """
-    logging.info("Starting one-time RU -> source NETCONF startup sync")
-    ru_session = await try_connect_ru(args, alarm_mgr)
-    if ru_session is None:
-        logging.warning("Startup sync skipped: unable to connect RU NETCONF server")
-        return False
-
-    try:
-        ru_data_xml = await asyncio.to_thread(lambda: ru_session.get_config(source=args.ru_datastore).data_xml)
-        ru_data_root, prefixed_ns = _parse_data_xml(ru_data_xml)
-        attempted = 0
-        applied = 0
-        skipped = 0
-        for child in list(ru_data_root):
-            ns = _extract_xml_namespace(child.tag)
-            local = child.tag.split("}", maxsplit=1)[-1]
-            if ns not in SYNC_ALLOWED_NAMESPACES:
-                skipped += 1
-                logging.debug(f"Startup selective sync skipped '{local}' due to namespace filter '{ns}'")
-                continue
-
-            attempted += 1
-            try:
-                await asyncio.to_thread(
-                    source_session.edit_config,
-                    config=_build_edit_config_xml([child], prefixed_ns),
-                    format="xml",
-                    target=args.datastore,
-                    default_operation="merge",
-                )
-                applied += 1
-            except Exception as child_err:  # pylint: disable=broad-exception-caught
-                logging.warning(f"Startup selective sync failed for '{local}': {child_err}")
-
-        if applied:
-            logging.info(
-                f"Startup selective sync completed: applied {applied}/{attempted} top-level config element(s), "
-                f"skipped {skipped} filtered namespace element(s)"
-            )
-            return True
-        logging.warning(
-            f"Startup selective sync did not apply any config (attempted={attempted}, skipped={skipped})"
-        )
-        return False
-    except (ValueError, ET.ParseError) as e:
-        logging.warning(f"Startup sync failed while converting RU NETCONF payload: {e}")
-        return False
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logging.warning(f"Startup sync failed while applying RU NETCONF payload: {e}")
-        return False
-    finally:
-        with suppress(Exception):
-            ru_session.close_session()
-
-
-async def try_connect_ru(args, alarm_mgr):
-    """
-    Try to connect to the RU NETCONF server once.
-    Returns manager instance if successful, None otherwise
-    """
-    try:
-        # run blocking ncclient call in a background thread
-        def connect():
-            # pylint: disable=duplicate-code
-            m = manager.connect(
-                host=args.ru_netconf_host,
-                port=args.ru_netconf_port,
-                username=args.ru_netconf_username,
-                password=args.ru_netconf_password,
-                hostkey_verify=False,
-                allow_agent=False,
-                look_for_keys=False,
-                # timeout=RETRY_INTERVAL,
-            )
-            # pylint: enable=duplicate-code
-            logging.info("Connected to RU NETCONF server")
-            alarm_mgr.clear_alarm(
-                1003,
-                message="RU NETCONF connection restored",
-            )
-            return m
-
-        return await asyncio.to_thread(connect)
-
-    except (
-        SSHError,
-        AuthenticationError,
-        SessionCloseError,
-    ) as e:
-        logging.warning(f"RU NETCONF connection failed: {e}")
-        alarm_mgr.set_alarm(
-            1003,
-            message="RU NETCONF connection lost",
-        )
-        return None
-
-
-async def ru_forwarder_main(state: AppState, args, alarm_mgr):
-    """Main loop for forwarding source NETCONF updates to the RU NETCONF server."""
-    while True:
-        ru_session = await try_connect_ru(args, alarm_mgr)
-        if ru_session:
-            state.session_state["ru_nc_connected"] = True
-            ru_config = RuConfig(ru_session, args.ru_datastore)
-
-            while ru_session.connected:
-                try:
-                    data_xml = await asyncio.wait_for(state.ru_update_queue.get(), timeout=1)
-                except asyncio.TimeoutError:
-                    continue
-
-                try:
-                    edit_payload = _data_xml_to_edit_config_xml(
-                        data_xml,
-                        include_namespaces=SYNC_ALLOWED_NAMESPACES,
-                    )
-                    await asyncio.to_thread(ru_config.edit_config, edit_payload, "Forwarded NETCONF config")
-                    logging.info("Forwarded NETCONF update to RU")
-                except (ValueError, ET.ParseError) as e:
-                    logging.warning(f"Skipping RU forward update due to payload conversion error: {e}")
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    logging.warning(f"Failed forwarding NETCONF update to RU: {e}")
-                    if not ru_session.connected:
-                        break
-                finally:
-                    state.ru_update_queue.task_done()
-
-            with suppress(Exception):
-                ru_session.close_session()
-
-        if state.session_state.get("ru_nc_connected"):
-            state.session_state["ru_nc_connected"] = False
-
-        alarm_mgr.set_alarm(
-            1003,
-            message="RU NETCONF connection lost",
-        )
-        logging.debug(f"Retrying RU NETCONF forwarder in {RETRY_INTERVAL} seconds...")
         await asyncio.sleep(RETRY_INTERVAL)
 
 
@@ -508,12 +293,13 @@ async def orchestrator(args, alarm_mgr):
     """Orchestrator: run NETCONF + WebSocket tasks."""
     # Create shared state
     state = AppState()
+    ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
 
     configure_app(state, args.autoheal)
 
     await asyncio.gather(
-        netconf_main(state, args, alarm_mgr),
-        ru_forwarder_main(state, args, alarm_mgr) if args.ru_forward else asyncio.sleep(0),
+        netconf_main(state, args, alarm_mgr, ru_forwarder),
+        ru_forwarder.run() if ru_forwarder else asyncio.sleep(0),
         ws_handler(state, args, alarm_mgr),
         ptp_log_monitor(args.ptp_log, state.ptp_stats_queue) if args.ptp_log else asyncio.sleep(0),
         (
