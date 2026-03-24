@@ -42,6 +42,32 @@ headers:
   stage: ci
   extends: .headers
 
+o1 integration tests downstream:
+  stage: test
+  inherit:
+    variables: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merge_train"'
+      variables:
+        O1_TESTS_UPSTREAM_PIPELINE_KIND: merge_train
+        O1_TESTS_UPSTREAM_REF: refs/merge-requests/$CI_MERGE_REQUEST_IID/train
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merged_result"'
+      variables:
+        O1_TESTS_UPSTREAM_PIPELINE_KIND: merged_result
+        O1_TESTS_UPSTREAM_REF: refs/merge-requests/$CI_MERGE_REQUEST_IID/merge
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      variables:
+        O1_TESTS_UPSTREAM_PIPELINE_KIND: detached
+        O1_TESTS_UPSTREAM_REF: $CI_MERGE_REQUEST_REF_PATH
+  variables:
+    O1_TESTS_UPSTREAM_COMPONENT: ocudu_o1_adapter
+    O1_TESTS_UPSTREAM_PROJECT_PATH: $CI_PROJECT_PATH
+    O1_TESTS_UPSTREAM_SHA: $CI_COMMIT_SHA
+  trigger:
+    project: ocudu/ocudu_elements/ocudu_oran_apps/ocudu_o1_tests
+    branch: main
+    strategy: mirror
+
 ################################################################################
 # Publish Docker images
 ################################################################################
