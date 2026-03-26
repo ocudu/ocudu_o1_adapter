@@ -47,18 +47,12 @@ o1 integration tests downstream:
   inherit:
     variables: false
   rules:
+    # here we can not use the predefined variables ON_MR and ON_MR_TRAIN because
+    # inheriting them in the parent pipeline will also pass them to the child pipeline
+    # thus triggering the whole child pipeline instead of just o1 integration tests job
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merge_train"'
-      variables:
-        O1_TESTS_UPSTREAM_PIPELINE_KIND: merge_train
-        O1_TESTS_UPSTREAM_REF: refs/merge-requests/$CI_MERGE_REQUEST_IID/train
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merged_result"'
-      variables:
-        O1_TESTS_UPSTREAM_PIPELINE_KIND: merged_result
-        O1_TESTS_UPSTREAM_REF: refs/merge-requests/$CI_MERGE_REQUEST_IID/merge
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      variables:
-        O1_TESTS_UPSTREAM_PIPELINE_KIND: detached
-        O1_TESTS_UPSTREAM_REF: $CI_MERGE_REQUEST_REF_PATH
   variables:
     O1_TESTS_UPSTREAM_COMPONENT: ocudu_o1_adapter
     O1_TESTS_UPSTREAM_PROJECT_PATH: $CI_PROJECT_PATH

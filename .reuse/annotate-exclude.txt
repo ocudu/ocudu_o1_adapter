@@ -1,5 +1,5 @@
-/\.git/
-/\.reuse/
-/REUSE\.toml$
+\.git/
+\.reuse/
+REUSE\.toml$
 \.md$
 \.mdx$
