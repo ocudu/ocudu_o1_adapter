@@ -16,7 +16,19 @@ ru_dummy:
 {% endif %}
 
 hal:
-{% for key, value in hal_config.items() %}
+{% if hal_config.get("bbdev_hwacc") %}
+  bbdev_hwacc:{% for key, value in hal_config.bbdev_hwacc.items() if key not in ["pdsch_enc", "pusch_dec"] %}
+    {{ key }}: {{ value }}{% endfor %}
+    {% if hal_config.bbdev_hwacc.get("pdsch_enc") %}
+    pdsch_enc:{% for sub_key, sub_value in hal_config.bbdev_hwacc.pdsch_enc.items() %}
+      {{ sub_key }}: {{ sub_value }}{% endfor %}
+    {% endif -%}
+    {% if hal_config.bbdev_hwacc.get("pusch_dec") %}
+    pusch_dec:{% for sub_key, sub_value in hal_config.bbdev_hwacc.pusch_dec.items() %}
+      {{ sub_key }}: {{ sub_value }}{% endfor %}
+    {% endif -%}
+{% endif -%}
+{% for key, value in hal_config.items() if key != "bbdev_hwacc" %}
   {{ key }}: {{ value }}
 {% endfor %}
 
