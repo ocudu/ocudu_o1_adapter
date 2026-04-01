@@ -370,7 +370,7 @@ class ConfigManager:
                 "slicing": [
                     {
                         "sst": rrm_policy_config["rRMPolicyMemberList"]["sst"],
-                        "sd": rrm_policy_config["rRMPolicyMemberList"]["sd"],
+                        "sd": int(rrm_policy_config["rRMPolicyMemberList"]["sd"], 16),
                         "sched_cfg": {
                             "min_prb_policy_ratio": rrm_policy_config["rRMPolicyMinRatio"],
                             "max_prb_policy_ratio": rrm_policy_config["rRMPolicyMaxRatio"],
