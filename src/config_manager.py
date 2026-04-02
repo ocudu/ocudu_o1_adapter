@@ -121,18 +121,18 @@ class ConfigManager:
             du_cell_config = []
             for cell in nc_du_cell_config:
                 try:
-                    nc_cell_extension = cell["attributes"]["srs_nrcelldu_extensions"]
+                    nc_cell_extension = cell["attributes"]["ocudu_nrcelldu_extensions"]
                 except KeyError as e:
-                    logging.warning(f"Couldn't extract srsRAN nrcelldu config extensions: {e}")
+                    logging.warning(f"Couldn't extract OCUDU nrcelldu config extensions: {e}")
 
                 # build DU cell struct to overwrite common cell_cfg fields with individual values
                 new_du_cell = {}
                 try:
-                    for key, value in nc_cell_extension["srs_nrcelldu_ssb_extensions"].items():
+                    for key, value in nc_cell_extension["ocudu_nrcelldu_ssb_extensions"].items():
                         value = int(value) if value.isnumeric() else value
                         new_du_cell[key] = int(value)
                 except KeyError as e:
-                    logging.warning(f"Couldn't extract srsRAN SSB config extensions: {e}")
+                    logging.warning(f"Couldn't extract OCUDU SSB config extensions: {e}")
 
                 # Extract cell-specific values from standard attributes
                 try:
@@ -212,16 +212,16 @@ class ConfigManager:
         metrics_config = {}
         remote_control_config = {}
         try:
-            srs_gnbdufunction_extensions = raw_config["data"]["ManagedElement"]["GNBDUFunction"][
-                "srs_gnbdufunction_extensions"
+            ocudu_gnbdufunction_extensions = raw_config["data"]["ManagedElement"]["GNBDUFunction"][
+                "ocudu_gnbdufunction_extensions"
             ]
-            testmode_config = srs_gnbdufunction_extensions["srs_gnbdufunction_testmode_extensions"]
-            log_config = srs_gnbdufunction_extensions["srs_gnbdufunction_log_extensions"]
-            hal_config = srs_gnbdufunction_extensions["srs_hal_extensions"]
-            metrics_config = srs_gnbdufunction_extensions["srs_metrics_extensions"]
-            remote_control_config = srs_gnbdufunction_extensions["srs_remote_control_extensions"]
+            testmode_config = ocudu_gnbdufunction_extensions["ocudu_gnbdufunction_testmode_extensions"]
+            log_config = ocudu_gnbdufunction_extensions["ocudu_gnbdufunction_log_extensions"]
+            hal_config = ocudu_gnbdufunction_extensions["ocudu_hal_extensions"]
+            metrics_config = ocudu_gnbdufunction_extensions["ocudu_metrics_extensions"]
+            remote_control_config = ocudu_gnbdufunction_extensions["ocudu_remote_control_extensions"]
         except KeyError as e:
-            logging.warning(f"Couldn't extract srsRAN GNBDUFunction extensions: {e}")
+            logging.warning(f"Couldn't extract OCUDU GNBDUFunction extensions: {e}")
 
         # Render config file
         try:
@@ -345,7 +345,7 @@ class ConfigManager:
             }
 
         except (KeyError, ValueError) as e:
-            logging.warning(f"Couldn't extract srsRAN RRM policy config: {e}")
+            logging.warning(f"Couldn't extract OCUDU RRM policy config: {e}")
 
         return cfg
 
@@ -380,7 +380,7 @@ class ConfigManager:
             }
 
         except KeyError as e:
-            logging.warning(f"Couldn't extract srsRAN RRM policy config: {e}")
+            logging.warning(f"Couldn't extract OCUDU RRM policy config: {e}")
 
         return cell_cfg
 
@@ -390,15 +390,15 @@ class ConfigManager:
         du_cell_config = []
         for cell in self.get_du_cell_config(raw_config):
             try:
-                nc_cell_extension = cell["attributes"]["srs_nrcelldu_extensions"]
+                nc_cell_extension = cell["attributes"]["ocudu_nrcelldu_extensions"]
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN nrcelldu config extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU nrcelldu config extensions: {e}")
 
-            # Extract custom srsRAN extensions
+            # Extract custom ocudu extensions
             try:
                 # build OFH cell struct
                 new_ofh_cell = {}
-                for key, value in nc_cell_extension["srs_nrcelldu_ofh_extensions"].items():
+                for key, value in nc_cell_extension["ocudu_nrcelldu_ofh_extensions"].items():
                     if "compr_method" in key:
                         value = "bfp" if "BLOCK_FLOATING_POINT" in value else value
                     if "static_compr_hdr" in key:
@@ -406,42 +406,42 @@ class ConfigManager:
                     new_ofh_cell[key] = value
                 ofh_cell_config.append(new_ofh_cell)
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN OFH config extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU OFH config extensions: {e}")
 
             # build DU cell struct to overwrite common cell_cfg fields with individual values
             new_du_cell = {}
 
             try:
                 ssb_fields = {}
-                for key, value in nc_cell_extension["srs_nrcelldu_ssb_extensions"].items():
+                for key, value in nc_cell_extension["ocudu_nrcelldu_ssb_extensions"].items():
                     ssb_fields[key] = value
                 new_du_cell["ssb"] = ssb_fields
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN SSB config extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU SSB config extensions: {e}")
 
             try:
                 prach_fields = {}
-                for key, value in nc_cell_extension["srs_nrcelldu_prach_extensions"].items():
+                for key, value in nc_cell_extension["ocudu_nrcelldu_prach_extensions"].items():
                     prach_fields[key] = value
                 new_du_cell["prach"] = prach_fields
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN PRACH config extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU PRACH config extensions: {e}")
 
             try:
                 tdd_fields = {}
-                for key, value in nc_cell_extension["srs_nrcelldu_tdd_extensions"].items():
+                for key, value in nc_cell_extension["ocudu_nrcelldu_tdd_extensions"].items():
                     tdd_fields[key] = value
                 new_du_cell["tdd_ul_dl_cfg"] = tdd_fields
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN TDD config extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU TDD config extensions: {e}")
 
             try:
-                for key, value in nc_cell_extension["srs_nrcelldu_base_extensions"].items():
+                for key, value in nc_cell_extension["ocudu_nrcelldu_base_extensions"].items():
                     if "scs" in key:
                         value = "".join(filter(str.isdigit, value))
                     new_du_cell[key] = value
             except KeyError as e:
-                logging.warning(f"Couldn't extract srsRAN cell base extensions: {e}")
+                logging.warning(f"Couldn't extract OCUDU cell base extensions: {e}")
 
             # Extract values from standard attributes
             new_du_cell.update(

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
-"""Helpers to derive srsRAN Open Fronthaul configuration from NETCONF payloads."""
+"""Helpers to derive OCUDU Open Fronthaul configuration from NETCONF payloads."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _first_value(entries: List[Dict[str, Any]], key: str) -> Any:
 
 
 def _normalize_compression(compression_value: Optional[str]) -> Tuple[Optional[str], Optional[bool]]:
-    """Map NETCONF compression type to srsRAN format and static header flag."""
+    """Map NETCONF compression type to OCUDU format and static header flag."""
     if not compression_value:
         return None, None
     comp_upper = compression_value.replace("-", " ").replace("_", " ").upper()
@@ -78,7 +78,7 @@ def _extract_endpoints(endpoints: Any, prefix: str) -> List[Dict[str, Any]]:
 def build_ofh_config(
     uplane_cfg: Dict[str, Any], processing_cfg: Dict[str, Any], interfaces_cfg: Dict[str, Any]
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """Construct the srsRAN OFH and cell_cfg configuration from NETCONF responses."""
+    """Construct the OCUDU OFH and cell_cfg configuration from NETCONF responses."""
     if not uplane_cfg and not processing_cfg:
         return None, None
 

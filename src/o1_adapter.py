@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """
-This module provides an O1 adapter for srsRAN, which manages and updates the configuration of a gNB / CU / DU .
+This module provides an O1 adapter for OCUDU, which manages and updates the configuration of a gNB / CU / DU .
 It includes functionalities for retrieving configurations, detecting changes,
 updating runtime configurations and triggering full restarts if necessary.
 
@@ -327,7 +327,7 @@ def start_flask():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="srsRAN Enterprise O1 adapter.")
+    parser = argparse.ArgumentParser(description="OCUDU O1 adapter.")
 
     parser.add_argument(
         "--netconf_host",
@@ -527,7 +527,7 @@ if __name__ == "__main__":
         format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s",
         level=cmd_args.loglevel,
     )
-    logging.info("srsRAN O1 adapter")
+    logging.info("OCUDU O1 adapter")
 
     # Reduce ncclient verbosity
     logger = logging.getLogger("ncclient")

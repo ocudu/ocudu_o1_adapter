@@ -196,7 +196,7 @@ class RuConfig:
                 if ofh_cell:
                     print_ofh_config(ofh_cell, cell_cfg)
             except (KeyError, TypeError, ValueError) as err:  # pragma: no cover - defensive
-                logging.error("Failed to render srsRAN OFH config snippet: %s", err)
+                logging.error("Failed to render OCUDU OFH config snippet: %s", err)
 
     def _get_and_print_config(self, filter_xml, description):
         """Fetch a NETCONF subtree, pretty print it and return the parsed dict."""
@@ -222,7 +222,7 @@ class RuConfig:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="srsRAN Enterprise O-RU controller.")
+    parser = argparse.ArgumentParser(description="OCUDU O-RU controller.")
 
     # Netconf configs
     parser.add_argument("--host", type=str, default="localhost", help="The device IP or DN")
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s", level=args.log_level)
-    logging.info("srsRAN mplane controller")
+    logging.info("OCUDU mplane controller")
 
     # Reduce ncclient verbosity
     logger = logging.getLogger("ncclient")

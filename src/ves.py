@@ -31,9 +31,9 @@ class VesMessages:
     _VERIFY = False
     _NF_VENDOR = "Software Radio Systems"
     _NF_VERSION = "25.04"
-    _REPORTING_ENTITY = "srsdu"
+    _REPORTING_ENTITY = "ocududu"
     _NF_NAMING_CODE = "123"
-    _SOURCE_NAME = "srsdu"
+    _SOURCE_NAME = "ocududu"
     _POST_TIMEOUT = 10
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -106,13 +106,13 @@ class VesMessages:
             domain="stndDefined",
             eventId="ManagedElement=ran1,GNBDUFunction=du1,NRCellDU=nrcelldu1",
             nodeId="ran1",
-            eventType="srsRAN_Alarm",
+            eventType="ocudu_Alarm",
             priority="High",
             nfNamingCode=self._NF_NAMING_CODE,
             nfVendorName=self._NF_VENDOR,
             reportingEntityName=self._REPORTING_ENTITY,
             softwareVersion=self._NF_VERSION,
-            sourceName="srsdu",
+            sourceName="ocududu",
             sourceId="noIdea",
             sequence=self.sequence,
             oamV4IpAddress=self.oam_ipv4_address,

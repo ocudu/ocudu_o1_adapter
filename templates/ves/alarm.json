@@ -36,7 +36,7 @@
                 "trendIndication": "{{ NO_CHANGE }}",
                 "stateChangeDefinition": [{ "operational-state": "DISABLED" }],
                 "proposedRepairActions": "Add more units",
-                "additionalText": "srs",
+                "additionalText": "ocudu",
                 "rootCauseIndicator": false
             },
             "stndDefinedFieldsVersion": "1.0"
