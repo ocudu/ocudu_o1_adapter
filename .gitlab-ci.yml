@@ -64,7 +64,7 @@ o1 integration tests downstream:
     O1_TESTS_UPSTREAM_SHA: $CI_COMMIT_SHA
   trigger:
     project: ocudu/ocudu_elements/ocudu_oran_apps/ocudu_o1_tests
-    branch: main
+    branch: dev
     strategy: mirror
 
 ################################################################################
