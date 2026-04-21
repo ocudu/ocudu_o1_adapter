@@ -203,7 +203,7 @@ class ConfigManager:
 
         ofh_cell_config, du_cell_config = self._extract_cells_config(raw_config)
         cell_config = self._extract_cell_config(raw_config, du_cell_config)
-        cucp_config = self._extract_cucp_config(raw_config, du_cell_config, cell_config)
+        cucp_config = self._extract_cucp_config(raw_config, du_cell_config)
 
         # GNBDUFunction extensions
         testmode_config = {"enabled": False}
@@ -270,7 +270,7 @@ class ConfigManager:
             logging.debug(f"Dropped {dropped} stale RU forwarding update(s)")
         logging.debug("Queued RU forwarding update")
 
-    def _extract_cucp_config(self, raw_config, du_cells=None, cell_cfg=None):
+    def _extract_cucp_config(self, raw_config, du_cells=None):
         cucp_config = {}
         try:
 
@@ -286,17 +286,18 @@ class ConfigManager:
                         tac = cell["tac"]
                         break
 
-            tai_slice_support_list = [
-                {
-                    "sst": 1,  # Default value, can be overwritten by cell config
-                }
-            ]
-
-            if cell_cfg is not None:
+            tai_slice_support_list = [{"sst": 1}]  # Default if RRMPolicyRatio is absent
+            try:
+                nc_rrm_members = nc_cucp_config["RRMPolicyRatio"]["attributes"]["rRMPolicyMemberList"]
+                if not isinstance(nc_rrm_members, list):
+                    nc_rrm_members = [nc_rrm_members]
                 tai_slice_support_list = []
-                if cell_cfg["plmn"] == plmn:
-                    for s in cell_cfg["slicing"]:
-                        tai_slice_support_list.append({"sst": s["sst"], "sd": s["sd"]})
+                for member in nc_rrm_members:
+                    tai_slice_support_list.append(
+                        {"sst": int(member["sst"]), "sd": self._parse_sd(member["sd"])}
+                    )
+            except (KeyError, ValueError) as e:
+                logging.warning(f"Couldn't extract tai_slice_support_list from GNBCUCPFunction RRMPolicyRatio: {e}")
 
             supported_tracking_areas = [
                 {
@@ -323,10 +324,16 @@ class ConfigManager:
 
         return cucp_config
 
+    @staticmethod
+    def _parse_sd(sd):
+        # 3GPP SD is 3 octets; YANG model encodes it as colon-separated hex bytes
+        # (e.g. "ff:ff:ff"). Strip the separators before parsing as a hex integer.
+        return int(sd.replace(":", ""), 16)
+
     def _extract_rrm_policy_ratio_config(self, raw_config):
         cfg = {}
         try:
-            rrm_policy_config = raw_config["data"]["RRMPolicyRatio"]["attributes"]
+            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"]["attributes"]
 
             # Build config subtree
             cfg = {
@@ -336,7 +343,7 @@ class ConfigManager:
                         "plmn": rrm_policy_config["rRMPolicyMemberList"]["mcc"]
                         + rrm_policy_config["rRMPolicyMemberList"]["mnc"],
                         "sst": int(rrm_policy_config["rRMPolicyMemberList"]["sst"]),
-                        "sd": int(rrm_policy_config["rRMPolicyMemberList"]["sd"], 16),
+                        "sd": self._parse_sd(rrm_policy_config["rRMPolicyMemberList"]["sd"]),
                     },
                 ],
                 "min_prb_policy_ratio": int(rrm_policy_config["rRMPolicyMinRatio"]),
@@ -352,7 +359,7 @@ class ConfigManager:
     def _extract_cell_config(self, raw_config, du_cells=None):
         cell_cfg = {}
         try:
-            rrm_policy_config = raw_config["data"]["RRMPolicyRatio"]["attributes"]
+            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"]["attributes"]
 
             plmn = rrm_policy_config["rRMPolicyMemberList"]["mcc"] + rrm_policy_config["rRMPolicyMemberList"]["mnc"]
 
@@ -370,7 +377,7 @@ class ConfigManager:
                 "slicing": [
                     {
                         "sst": rrm_policy_config["rRMPolicyMemberList"]["sst"],
-                        "sd": int(rrm_policy_config["rRMPolicyMemberList"]["sd"], 16),
+                        "sd": self._parse_sd(rrm_policy_config["rRMPolicyMemberList"]["sd"]),
                         "sched_cfg": {
                             "min_prb_policy_ratio": rrm_policy_config["rRMPolicyMinRatio"],
                             "max_prb_policy_ratio": rrm_policy_config["rRMPolicyMaxRatio"],
@@ -379,7 +386,7 @@ class ConfigManager:
                 ],
             }
 
-        except KeyError as e:
+        except (KeyError, ValueError) as e:
             logging.warning(f"Couldn't extract OCUDU RRM policy config: {e}")
 
         return cell_cfg
