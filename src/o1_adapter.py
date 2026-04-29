@@ -178,6 +178,7 @@ async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
                 args.config,
                 args.template,
                 args.ru_forward,
+                profile=args.profile,
             )
             worker = asyncio.create_task(writer.run(stop_event))
             writer.write_full_config(None)
@@ -396,11 +397,21 @@ if __name__ == "__main__":
         help="Datastore to use",
     )
     parser.add_argument(
+        "--profile",
+        choices=("gnb", "cu", "cucp", "cuup", "du", "ru"),
+        default="gnb",
+        help=(
+            "NETCONF YANG profile served by the upstream server. Selects the "
+            "default template (<profile>.yaml) and, for 'ru', skips yaml "
+            "rendering entirely (raw config is just forwarded downstream)."
+        ),
+    )
+    parser.add_argument(
         "-t",
         "--template",
         type=str,
-        default="gnb.yaml",
-        help="Config filename",
+        default=None,
+        help="Config template filename (default: <profile>.yaml)",
     )
     parser.add_argument(
         "-c",
@@ -511,6 +522,10 @@ if __name__ == "__main__":
     )
 
     cmd_args = parser.parse_args()
+
+    if cmd_args.template is None:
+        # ru profile doesn't render a yaml; ConfigManager won't read this.
+        cmd_args.template = f"{cmd_args.profile}.yaml"
 
     if cmd_args.ru_forward:
         missing_ru_args = []
