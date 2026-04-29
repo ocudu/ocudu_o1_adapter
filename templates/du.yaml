@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+
+{% if ofh_cells %}
+ru_ofh:
+  cells:
+  {% for dict_item in ofh_cells -%}
+    -
+    {% for key, value in dict_item.items() -%}
+      {{key}}: {{ value }}
+    {% endfor %}
+  {% endfor %}
+{% else %}
+ru_dummy:
+{% endif %}
+
+hal:
+{% for key, value in hal_config.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+
+cells:
+{% for dict_item in du_cells -%}
+-
+  {% for key, value in dict_item.items() -%}
+  {% if value is number or value is string -%}
+  {{ key }}: {{ value }}
+  {% else -%}
+  {{ key }}:
+  {% for key2, value2 in value.items() %}
+    {{ key2 }}: {{ value2 }}
+  {% endfor -%}
+  {% endif -%}
+  {% endfor %}
+{% endfor -%}
+
+cell_cfg:
+  {% for key, value in cell_config.items() -%}
+  {% if value is number or value is string -%}
+  {{ key }}: {{ value }}
+  {% else %}
+  {{ key }}:
+  {% for list_item in value -%}
+  -
+    {% for key2, value2 in list_item.items() -%}
+    {% if value2 is number or value2 is string -%}
+    {{ key2 }}: {{ value2 }}
+    {% else -%}
+    {{ key2 }}:
+    {% for key3, value3 in value2.items() %}
+      {{ key3 }}: {{ value3 }}
+    {% endfor -%}
+    {% endif -%}
+  {% endfor -%}
+  {% endfor %}
+  {% endif -%}
+  {% endfor %}
+
+
+log:{% for key, value in log_config.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+{% if testmode_config["enabled"] == "true" -%}
+test_mode:
+  test_ue:{% for key, value in testmode_config.items() if "enabled" not in key %}
+    {{ key }}: {{ value }}{% endfor %}
+{% endif -%}
+
+remote_control:{% for key, value in remote_control_config.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+
+metrics:{% for key, value in metrics_config.items() if key not in ["layers", "periodicity"] %}
+  {% if value is number or value is string -%}
+  {{ key }}: {{ value }}
+  {% else -%}
+  {{ key }}:
+  {% for sub_key, sub_value in value.items() -%}
+    {{ sub_key }}: {{ sub_value }}
+  {% endfor -%}
+  {% endif -%}
+{% endfor %}
+{% if metrics_config.get("periodicity") %}
+  periodicity:{% for sub_key, sub_value in metrics_config.periodicity.items() %}
+    {{ sub_key }}: {{ sub_value }}
+{% endfor %}
+{% endif %}
+{% if metrics_config.get("layers") %}
+  layers:{% for layer_key, layer_value in metrics_config.layers.items() %}
+    {{ layer_key }}: {{ layer_value }}
+{% endfor %}
+{% endif %}

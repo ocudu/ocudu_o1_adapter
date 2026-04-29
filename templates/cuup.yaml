@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+
+cu_up:
+{% if cuup_config.e1ap is defined %}
+  e1ap:
+    addrs: {{ cuup_config.e1ap.addrs }}
+    bind_addrs: {{ cuup_config.e1ap.bind_addrs }}
+{% endif %}
+{% if cuup_config.ngu is defined %}
+  ngu:
+    socket:
+{% for s in cuup_config.ngu.socket %}      - bind_addr: {{ s.bind_addr }}
+{% endfor %}
+{% endif %}
+{% if cuup_config.f1u is defined %}
+  f1u:
+    socket:
+{% for s in cuup_config.f1u.socket %}      - bind_addr: {{ s.bind_addr }}
+{% endfor %}
+{% endif %}
