@@ -35,7 +35,7 @@ class ConfigManager:
     _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio"]
     _FULL_RESTART_TIMEOUT = 30
 
-    def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename, ru_forward_enabled):
+    def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename, ru_forward_enabled, profile="gnb"):
         # execute the base constructor
         self.netconf_manager = netconf_manager
         self.datastore = datastore
@@ -45,6 +45,7 @@ class ConfigManager:
         self.state = state
         self._ws = WsRemoteCommands(state.ws_send_queue)  # Inject shared WS send queue
         self._ru_forward_enabled = ru_forward_enabled
+        self._render_enabled = profile != "ru"
 
     async def process_config_update(self):
         """
@@ -57,6 +58,11 @@ class ConfigManager:
         diff = DeepDiff(self.last_config, raw_config, ignore_order=True)
         if not diff:
             logging.debug("No config change detected")
+            return
+
+        # RU profile: forward raw config only, skip gNB-shaped diff classification.
+        if not self._render_enabled:
+            self.write_full_config(raw_config, raw_xml)
             return
 
         # Check if only runtime updatable parameters changed
@@ -201,9 +207,14 @@ class ConfigManager:
         # Store config
         self.last_config = raw_config
 
+        if not self._render_enabled:
+            self._enqueue_ru_forward_update(raw_xml)
+            return True
+
         ofh_cell_config, du_cell_config = self._extract_cells_config(raw_config)
         cell_config = self._extract_cell_config(raw_config, du_cell_config)
         cucp_config = self._extract_cucp_config(raw_config, du_cell_config)
+        cuup_config = self._extract_cuup_config(raw_config)
 
         # GNBDUFunction extensions
         testmode_config = {"enabled": False}
@@ -231,6 +242,7 @@ class ConfigManager:
                 ofh_cells=ofh_cell_config,
                 du_cells=du_cell_config,
                 cucp_config=cucp_config,
+                cuup_config=cuup_config,
                 testmode_config=testmode_config,
                 log_config=log_config,
                 hal_config=hal_config,
@@ -314,15 +326,48 @@ class ConfigManager:
             # Build AMF config subtree
             cucp_config = {
                 "amf": {
-                    "addr": nc_cucp_config["EP_NgC"]["attributes"]["remoteAddress"],
-                    "bind_addr": nc_cucp_config["EP_NgC"]["attributes"]["localAddress"]["ipAddress"],
+                    "addrs": nc_cucp_config["EP_NgC"]["attributes"]["remoteAddress"],
+                    "bind_addrs": nc_cucp_config["EP_NgC"]["attributes"]["localAddress"]["ipAddress"],
                     "supported_tracking_areas": supported_tracking_areas,
                 }
             }
+
+            for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
+                try:
+                    cucp_config[key] = {
+                        "bind_addrs": nc_cucp_config[ep]["attributes"]["localAddress"]["ipAddress"]
+                    }
+                except KeyError:
+                    pass
         except KeyError as e:
             logging.warning(f"Couldn't extract CU-CP config: {e}")
 
         return cucp_config
+
+    def _extract_cuup_config(self, raw_config):
+        cuup_config = {}
+        try:
+            nc_cuup = raw_config["data"]["ManagedElement"]["GNBCUUPFunction"]
+        except KeyError:
+            return cuup_config
+
+        try:
+            attrs = nc_cuup["EP_E1"]["attributes"]
+            cuup_config["e1ap"] = {
+                "addrs": attrs["remoteAddress"],
+                "bind_addrs": attrs["localAddress"]["ipAddress"],
+            }
+        except KeyError:
+            pass
+
+        for ep, key in (("EP_NgU", "ngu"), ("EP_F1U", "f1u")):
+            try:
+                bind = nc_cuup[ep]["attributes"]["localAddress"]["ipAddress"]
+                cuup_config[key] = {"socket": [{"bind_addr": bind}]}
+            except KeyError:
+                pass
+
+        return cuup_config
 
     @staticmethod
     def _parse_sd(sd):
