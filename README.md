@@ -45,6 +45,16 @@ To reset the health status send the following command to the server:
 
 An example Docker and k8s integration is provided.
 
+### Adapter component profiles
+
+The adapter ships templates for the following gNB split components in [templates/](./templates/): [gnb.yaml](./templates/gnb.yaml), [cu.yaml](./templates/cu.yaml), [cucp.yaml](./templates/cucp.yaml), [cuup.yaml](./templates/cuup.yaml) and [du.yaml](./templates/du.yaml). Select one with `--profile`, e.g.:
+
+```
+$ python3 src/o1_adapter.py --profile cucp
+```
+
+`--profile` defaults to `gnb` and selects `<profile>.yaml` as the rendering template. Pass `--template <file>` to override the template explicitly. The special value `--profile ru` skips YAML rendering entirely and only forwards the raw NETCONF config downstream.
+
 ### RU controller within O1 Adapter
 
 With the option `--ru_forward` the O1 Adapter automatically forwards configuration updates from the NETCONF server of the DU to the NETCONF server of the RU. In this case it has to be ensured, that two NETCONF servers are reachable. One represents the NETCONF server on the DU and the other NETCONF server runs on the RU. Then the forwarding can be achieved by the following command:
