@@ -90,3 +90,7 @@ metrics:{% for key, value in metrics_config.items() if key not in ["layers", "pe
     {{ layer_key }}: {{ layer_value }}
 {% endfor %}
 {% endif %}
+{% if pcap_config %}
+pcap:{% for channel, leaves in pcap_config.items() %}{% for k, v in leaves.items() %}
+  {{ channel }}_{{ k }}: {{ v }}{% endfor %}{% endfor %}
+{% endif %}
