@@ -216,23 +216,48 @@ class ConfigManager:
         cucp_config = self._extract_cucp_config(raw_config, du_cell_config)
         cuup_config = self._extract_cuup_config(raw_config)
 
-        # GNBDUFunction extensions
+        # Function extensions (DU/CU-CP/CU-UP). testmode/hal/remote_control live only on
+        # the DU; log and metrics may live on any of DU/CU-CP/CU-UP depending on profile;
+        # pcap entries are merged across all functions present.
         testmode_config = {"enabled": False}
         log_config = {}
         hal_config = {}
         metrics_config = {}
         remote_control_config = {}
-        try:
-            ocudu_gnbdufunction_extensions = raw_config["data"]["ManagedElement"]["GNBDUFunction"][
-                "ocudu_gnbdufunction_extensions"
-            ]
-            testmode_config = ocudu_gnbdufunction_extensions["ocudu_gnbdufunction_testmode_extensions"]
-            log_config = ocudu_gnbdufunction_extensions["ocudu_gnbdufunction_log_extensions"]
-            hal_config = ocudu_gnbdufunction_extensions["ocudu_hal_extensions"]
-            metrics_config = ocudu_gnbdufunction_extensions["ocudu_metrics_extensions"]
-            remote_control_config = ocudu_gnbdufunction_extensions["ocudu_remote_control_extensions"]
-        except KeyError as e:
-            logging.warning(f"Couldn't extract OCUDU GNBDUFunction extensions: {e}")
+        pcap_config = {}
+
+        managed_element = raw_config.get("data", {}).get("ManagedElement", {})
+        for func_key, ext_key in (
+            ("GNBDUFunction", "ocudu_gnbdufunction_extensions"),
+            ("GNBCUCPFunction", "ocudu_gnbcucpfunction_extensions"),
+            ("GNBCUUPFunction", "ocudu_gnbcuupfunction_extensions"),
+        ):
+            try:
+                ext = managed_element[func_key][ext_key]
+            except (KeyError, TypeError):
+                continue
+
+            testmode = ext.get("ocudu_gnbdufunction_testmode_extensions")
+            if testmode is not None:
+                testmode_config = testmode
+            hal = ext.get("ocudu_hal_extensions")
+            if hal is not None:
+                hal_config = hal
+            remote = ext.get("ocudu_remote_control_extensions")
+            if remote is not None:
+                remote_control_config = remote
+
+            if not log_config:
+                log = ext.get("ocudu_log_extensions")
+                if log is not None:
+                    log_config = log
+            if not metrics_config:
+                metrics = ext.get("ocudu_metrics_extensions")
+                if metrics is not None:
+                    metrics_config = metrics
+
+            pcap = ext.get("ocudu_pcap_extensions") or {}
+            pcap_config.update(pcap)
 
         # Render config file
         try:
@@ -248,6 +273,7 @@ class ConfigManager:
                 hal_config=hal_config,
                 metrics_config=metrics_config,
                 remote_control_config=remote_control_config,
+                pcap_config=pcap_config,
                 cell_config=cell_config,
             )
         except jinja2_exceptions.UndefinedError as e:
