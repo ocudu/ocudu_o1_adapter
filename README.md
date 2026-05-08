@@ -47,7 +47,7 @@ An example Docker and k8s integration is provided.
 
 ### Adapter component profiles
 
-The adapter ships templates for the following gNB split components in [templates/](./templates/): [gnb.yaml](./templates/gnb.yaml), [cu.yaml](./templates/cu.yaml), [cucp.yaml](./templates/cucp.yaml), [cuup.yaml](./templates/cuup.yaml) and [du.yaml](./templates/du.yaml). Select one with `--profile`, e.g.:
+The adapter ships templates for the following gNB split components: `gnb.yaml`, `cu.yaml`, `cucp.yaml`, `cuup.yaml` and `du.yaml`. Select one with `--profile`, e.g.:
 
 ```
 $ python3 src/o1_adapter.py --profile cucp
