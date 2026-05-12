@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 import ncclient
 import xmltodict
@@ -368,7 +369,169 @@ class ConfigManager:
         except KeyError as e:
             logging.warning(f"Couldn't extract CU-CP config: {e}")
 
+        try:
+            mobility = self._extract_cucp_mobility_config(raw_config)
+            if mobility:
+                cucp_config["mobility"] = mobility
+        except (KeyError, ValueError, TypeError) as e:
+            logging.warning(f"Couldn't extract CU-CP mobility config: {e}")
+
         return cucp_config
+
+    def _extract_cucp_mobility_config(self, raw_config):
+        """Extract cu_cp.mobility from the NETCONF tree.
+
+        Returns a dict mirroring the gNB YAML mobility block, or None if no
+        mobility extension data is present.
+        """
+        try:
+            nc_cucp = raw_config["data"]["ManagedElement"]["GNBCUCPFunction"]
+        except KeyError:
+            return None
+
+        mob_ext = nc_cucp.get("ocudu_gnbcucpfunction_mobility_extensions")
+        cucp_attrs = nc_cucp["attributes"]
+
+        # NCI = (gNBId << (36 - gNBIdLength)) | cellLocalId per 3GPP TS 38.300.
+        gnb_id = int(cucp_attrs["gNBId"])
+        gnb_id_length = int(cucp_attrs["gNBIdLength"])
+        cell_id_shift = 36 - gnb_id_length
+
+        nrcellcu_list = self._ensure_list(nc_cucp.get("NRCellCU"))
+
+        nci_by_id = {}
+        for nrcellcu in nrcellcu_list:
+            local_id = int(nrcellcu["attributes"]["cellLocalId"])
+            nci_by_id[str(nrcellcu["id"])] = (gnb_id << cell_id_shift) | local_id
+
+        report_configs = []
+        if mob_ext:
+            for rc in self._ensure_list(mob_ext.get("report_configs")):
+                entry = {}
+                for key in (
+                    "report_cfg_id",
+                    "report_type",
+                    "periodic_ho_rsrp_offset_db",
+                    "event_triggered_report_type",
+                    "meas_trigger_quantity",
+                    "meas_trigger_quantity_threshold_db",
+                    "meas_trigger_quantity_threshold_2_db",
+                    "meas_trigger_quantity_offset_db",
+                    "hysteresis_db",
+                    "time_to_trigger_ms",
+                    "t312",
+                    "distance_thresh_from_ref1_km",
+                    "distance_thresh_from_ref2_km",
+                    "hysteresis_location_km",
+                    "ref_location1",
+                    "ref_location2",
+                    "t1_thres",
+                    "duration_s",
+                    "report_interval_ms",
+                ):
+                    if key in rc:
+                        value = rc[key]
+                        if key == "t1_thres":
+                            value = self._t1_thres_to_unix_ms(value)
+                        else:
+                            value = self._coerce_xml_value(value)
+                        entry[key] = value
+                if entry:
+                    report_configs.append(entry)
+
+        mobility_cells = []
+        for nrcellcu in nrcellcu_list:
+            nci = nci_by_id.get(str(nrcellcu.get("id")))
+            if nci is None:
+                continue
+
+            cellcu_mob = nrcellcu.get("attributes", {}).get("ocudu_nrcellcu_mobility_extensions") or {}
+            relations = self._ensure_list(nrcellcu.get("NRCellRelation"))
+
+            cell_entry = {"nr_cell_id": f"0x{nci:x}"}
+            if "periodic_report_cfg_id" in cellcu_mob:
+                cell_entry["periodic_report_cfg_id"] = int(cellcu_mob["periodic_report_cfg_id"])
+
+            ncells = []
+            for rel in relations:
+                rel_attrs = rel.get("attributes", {})
+                # Resolve the adjacentNRCellRef DN (e.g. "...,NRCellCU=nrcellcu2") to the target's NCI.
+                dn = rel_attrs.get("adjacentNRCellRef") or ""
+                target_nci = None
+                for component in str(dn).split(","):
+                    stripped = component.strip()
+                    if stripped.startswith("NRCellCU="):
+                        target_nci = nci_by_id.get(stripped.split("=", 1)[1].strip())
+                        break
+                if target_nci is None:
+                    continue
+                ncell = {"nr_cell_id": f"0x{target_nci:x}"}
+                refs = rel_attrs.get("ocudu_nrcellrelation_mobility_extensions", {}).get(
+                    "report_config_refs"
+                )
+                if refs is not None:
+                    ncell["report_configs"] = [int(r) for r in self._ensure_list(refs)]
+                ncells.append(ncell)
+            if ncells:
+                cell_entry["ncells"] = ncells
+
+            if "periodic_report_cfg_id" in cell_entry or "ncells" in cell_entry:
+                mobility_cells.append(cell_entry)
+
+        mobility = {}
+        if mob_ext and "trigger_handover_from_measurements" in mob_ext:
+            mobility["trigger_handover_from_measurements"] = str(
+                mob_ext["trigger_handover_from_measurements"]
+            ).lower()
+        if mob_ext and "trigger_cho_on_ue_setup" in mob_ext:
+            mobility["trigger_cho_on_ue_setup"] = str(mob_ext["trigger_cho_on_ue_setup"]).lower()
+        if mob_ext and "cho_timeout_ms" in mob_ext:
+            mobility["cho_timeout_ms"] = int(mob_ext["cho_timeout_ms"])
+        if mobility_cells:
+            mobility["cells"] = mobility_cells
+        if report_configs:
+            mobility["report_configs"] = report_configs
+
+        return mobility or None
+
+    @staticmethod
+    def _t1_thres_to_unix_ms(value):
+        """Normalise a t1_thres value to Unix milliseconds as int."""
+        # The YANG type accepts either Unix ms or an RFC 3339 timestamp; the gNB only accepts Unix ms.
+        text = str(value).strip()
+        if text.lstrip("-").isdigit():
+            return int(text)
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+
+    @staticmethod
+    def _coerce_xml_value(value):
+        """Convert xmltodict scalars to YAML-friendly Python values."""
+        # Recursively walk dicts/lists and turn numeric-looking strings into int/float.
+        if isinstance(value, dict):
+            return {key: ConfigManager._coerce_xml_value(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [ConfigManager._coerce_xml_value(val) for val in value]
+        if isinstance(value, str):
+            text = value.strip()
+            if text.lstrip("-").isdigit():
+                return int(text)
+            try:
+                return float(text)
+            except ValueError:
+                return value
+        return value
+
+    @staticmethod
+    def _ensure_list(value):
+        """Normalise xmltodict output: missing -> [], single -> [x], list -> list."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
 
     def _extract_cuup_config(self, raw_config):
         cuup_config = {}
