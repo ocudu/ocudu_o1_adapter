@@ -223,8 +223,8 @@ class ConfigManager:
         cuup_config = self._extract_cuup_config(raw_config)
 
         # Function extensions (DU/CU-CP/CU-UP). testmode/hal/remote_control live only on
-        # the DU; log and metrics may live on any of DU/CU-CP/CU-UP depending on profile;
-        # pcap entries are merged across all functions present.
+        # the DU; log lives on any function (first-wins); pcap entries are merged across
+        # all functions; metrics_extensions is now per-function and gets merged
         testmode_config = {"enabled": False}
         log_config = {}
         hal_config = {}
@@ -257,10 +257,14 @@ class ConfigManager:
                 log = ext.get("ocudu_log_extensions")
                 if log is not None:
                     log_config = log
-            if not metrics_config:
-                metrics = ext.get("ocudu_metrics_extensions")
-                if metrics is not None:
-                    metrics_config = metrics
+
+            metrics = ext.get("ocudu_metrics_extensions")
+            if metrics is not None:
+                for key, value in metrics.items():
+                    if key in ("periodicity", "layers") and isinstance(value, dict):
+                        metrics_config.setdefault(key, {}).update(value)
+                    else:
+                        metrics_config[key] = value
 
             pcap = ext.get("ocudu_pcap_extensions") or {}
             pcap_config.update(pcap)
