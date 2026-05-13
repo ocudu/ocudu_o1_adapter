@@ -3,3 +3,4 @@
 REUSE\.toml$
 \.md$
 \.mdx$
+^templates/(_.*|du)\.yaml$
