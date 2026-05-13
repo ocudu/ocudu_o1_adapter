@@ -1,94 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
-cu_cp:
-  amf:
-    {% for key, value in cucp_config.amf.items() -%}
-    {% if value is number or value is string -%}
-    {{ key }}: {{ value }}
-    {% else %}
-    {{ key }}:
-    {% for list_item in value %}
-      - {% for key2, value2 in list_item.items() -%}
-        {% if value2 is number or value2 is string -%}
-        {{ key2 }}: {{ value2 }}
-        {% else -%}
-        {{ key2 }}:
-        {% for list_item2 in value2 %}
-          - {% for key3, value3 in list_item2.items() -%}
-            {% if value3 is number or value3 is string -%}
-            {{ key3 }}: {{ value3 }}
-            {% else -%}
-            {{ key3 }}:
-            {% for list_item3 in value3 %}
-              - {% for key4, value4 in list_item3.items() -%}
-                {{ key4 }}: {{ value4 }}
-                {% endfor -%}
-            {% endfor -%}
-            {% endif -%}
-            {% endfor -%}
-        {% endfor -%}
-        {% endif -%}
-        {% endfor -%}
-    {% endfor %}
-    {% endif -%}
-    {% endfor %}
-{% if cucp_config.e1ap is defined %}
-  e1ap:
-    bind_addrs: {{ cucp_config.e1ap.bind_addrs }}
-{% endif %}
+{% include "_cu_cp.yaml" %}
 {% if cucp_config.f1ap is defined %}
   f1ap:
     bind_addrs: {{ cucp_config.f1ap.bind_addrs }}
 {% endif %}
 
-cu_up:
-{% if cuup_config.e1ap is defined %}
-  e1ap:
-    addrs: {{ cuup_config.e1ap.addrs }}
-    bind_addrs: {{ cuup_config.e1ap.bind_addrs }}
-{% endif %}
-{% if cuup_config.ngu is defined %}
-  ngu:
-    socket:
-{% for s in cuup_config.ngu.socket %}      - bind_addr: {{ s.bind_addr }}
-{% endfor %}
-{% endif %}
-{% if cuup_config.f1u is defined %}
-  f1u:
-    socket:
-{% for s in cuup_config.f1u.socket %}      - bind_addr: {{ s.bind_addr }}
-{% endfor %}
-{% endif %}
+{% include "_cu_up.yaml" %}
 
-{% if log_config %}
-log:{% for key, value in log_config.items() %}
-  {{ key }}: {{ value }}
-{% endfor %}
-{% endif %}
-{% if metrics_config %}
-metrics:{% for key, value in metrics_config.items() if key not in ["layers", "periodicity", "autostart_stdout_metrics"] %}
-  {% if value is number or value is string -%}
-  {{ key }}: {{ value }}
-  {% else -%}
-  {{ key }}:
-  {% for sub_key, sub_value in value.items() -%}
-    {{ sub_key }}: {{ sub_value }}
-  {% endfor -%}
-  {% endif -%}
-{% endfor %}
-{% if metrics_config.get("periodicity") %}
-  periodicity:{% for sub_key, sub_value in metrics_config.periodicity.items() %}
-    {{ sub_key }}: {{ sub_value }}
-{% endfor %}
-{% endif %}
-{% if metrics_config.get("layers") %}
-  layers:{% for layer_key, layer_value in metrics_config.layers.items() %}
-    {{ layer_key }}: {{ layer_value }}
-{% endfor %}
-{% endif %}
-{% endif %}
-{% if pcap_config %}
-pcap:{% for channel, leaves in pcap_config.items() %}{% for k, v in leaves.items() %}
-  {{ channel }}_{{ k }}: {{ v }}{% endfor %}{% endfor %}
-{% endif %}
+{% include "_trailer.yaml" %}

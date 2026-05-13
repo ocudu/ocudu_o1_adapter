@@ -1,0 +1,62 @@
+{#-
+  SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+  SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+-#}
+cu_cp:
+  amf:
+    {% for key, value in cucp_config.amf.items() -%}
+    {% if value is number or value is string -%}
+    {{ key }}: {{ value }}
+    {% else %}
+    {{ key }}:
+    {% for list_item in value %}
+      - {% for key2, value2 in list_item.items() -%}
+        {% if value2 is number or value2 is string -%}
+        {{ key2 }}: {{ value2 }}
+        {% else -%}
+        {{ key2 }}:
+        {% for list_item2 in value2 %}
+          - {% for key3, value3 in list_item2.items() -%}
+            {% if value3 is number or value3 is string -%}
+            {{ key3 }}: {{ value3 }}
+            {% else -%}
+            {{ key3 }}:
+            {% for list_item3 in value3 %}
+              - {% for key4, value4 in list_item3.items() -%}
+                {{ key4 }}: {{ value4 }}
+                {% endfor -%}
+            {% endfor -%}
+            {% endif -%}
+            {% endfor -%}
+        {% endfor -%}
+        {% endif -%}
+        {% endfor -%}
+    {% endfor %}
+    {% endif -%}
+    {% endfor %}
+{% if cucp_config.mobility is defined %}
+  mobility:
+    trigger_handover_from_measurements: {{ cucp_config.mobility.trigger_handover_from_measurements }}
+    {% if cucp_config.mobility.trigger_cho_on_ue_setup is defined -%}
+    trigger_cho_on_ue_setup: {{ cucp_config.mobility.trigger_cho_on_ue_setup }}
+    {% endif -%}
+    {% if cucp_config.mobility.cho_timeout_ms is defined -%}
+    cho_timeout_ms: {{ cucp_config.mobility.cho_timeout_ms }}
+    {% endif -%}
+    cells:
+    {% for cell in cucp_config.mobility.cells -%}
+    - nr_cell_id: {{ cell.nr_cell_id }}
+      periodic_report_cfg_id: {{ cell.periodic_report_cfg_id }}
+      ncells:
+      {% for ncell in cell.ncells -%}
+      - nr_cell_id: {{ ncell.nr_cell_id }}
+        report_configs: {{ ncell.report_configs }}
+      {% endfor %}
+    {% endfor %}
+    report_configs:
+    {% for rc in cucp_config.mobility.report_configs -%}
+    - {% for k, v in rc.items() -%}
+      {{ k }}: {{ v }}
+      {% endfor %}
+    {% endfor %}
+{% endif %}

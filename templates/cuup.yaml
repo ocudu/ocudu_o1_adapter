@@ -1,53 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
-cu_up:
+{% include "_cu_up.yaml" %}
 {% if cuup_config.e1ap is defined %}
   e1ap:
     addrs: {{ cuup_config.e1ap.addrs }}
     bind_addrs: {{ cuup_config.e1ap.bind_addrs }}
 {% endif %}
-{% if cuup_config.ngu is defined %}
-  ngu:
-    socket:
-{% for s in cuup_config.ngu.socket %}      - bind_addr: {{ s.bind_addr }}
-{% endfor %}
-{% endif %}
-{% if cuup_config.f1u is defined %}
-  f1u:
-    socket:
-{% for s in cuup_config.f1u.socket %}      - bind_addr: {{ s.bind_addr }}
-{% endfor %}
-{% endif %}
 
-{% if log_config %}
-log:{% for key, value in log_config.items() %}
-  {{ key }}: {{ value }}
-{% endfor %}
-{% endif %}
-{% if metrics_config %}
-metrics:{% for key, value in metrics_config.items() if key not in ["layers", "periodicity", "autostart_stdout_metrics"] %}
-  {% if value is number or value is string -%}
-  {{ key }}: {{ value }}
-  {% else -%}
-  {{ key }}:
-  {% for sub_key, sub_value in value.items() -%}
-    {{ sub_key }}: {{ sub_value }}
-  {% endfor -%}
-  {% endif -%}
-{% endfor %}
-{% if metrics_config.get("periodicity") %}
-  periodicity:{% for sub_key, sub_value in metrics_config.periodicity.items() %}
-    {{ sub_key }}: {{ sub_value }}
-{% endfor %}
-{% endif %}
-{% if metrics_config.get("layers") %}
-  layers:{% for layer_key, layer_value in metrics_config.layers.items() %}
-    {{ layer_key }}: {{ layer_value }}
-{% endfor %}
-{% endif %}
-{% endif %}
-{% if pcap_config %}
-pcap:{% for channel, leaves in pcap_config.items() %}{% for k, v in leaves.items() %}
-  {{ channel }}_{{ k }}: {{ v }}{% endfor %}{% endfor %}
-{% endif %}
+{% include "_trailer.yaml" %}

@@ -1,0 +1,32 @@
+{#-
+  SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+  SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+-#}
+log:{% for key, value in log_config.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+remote_control:{% for key, value in remote_control_config.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+metrics:{% for key, value in metrics_config.items() if key not in ["layers", "periodicity"] %}
+  {% if value is number or value is string -%}
+  {{ key }}: {{ value }}
+  {% else -%}
+  {{ key }}:
+  {% for sub_key, sub_value in value.items() -%}
+    {{ sub_key }}: {{ sub_value }}
+  {% endfor -%}
+  {% endif -%}
+{% endfor %}
+{% if metrics_config.get("periodicity") %}
+  periodicity:{% for sub_key, sub_value in metrics_config.periodicity.items() %}
+    {{ sub_key }}: {{ sub_value }}
+{% endfor %}
+{% endif %}
+{% if metrics_config.get("layers") %}
+  layers:{% for layer_key, layer_value in metrics_config.layers.items() %}
+    {{ layer_key }}: {{ layer_value }}
+{% endfor %}
+{% endif %}
+pcap:{% for channel, leaves in pcap_config.items() %}{% for k, v in leaves.items() %}
+  {{ channel }}_{{ k }}: {{ v }}{% endfor %}{% endfor %}
