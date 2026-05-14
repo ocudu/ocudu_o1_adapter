@@ -723,6 +723,53 @@ class ConfigManager:
                 logging.warning(f"Couldn't extract OCUDU TDD config extensions: {e}")
 
             try:
+                pdsch_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_pdsch_extensions"].items():
+                    pdsch_fields[key] = value
+                new_du_cell["pdsch"] = pdsch_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU PDSCH config extensions: {e}")
+
+            try:
+                pusch_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_pusch_extensions"].items():
+                    pusch_fields[key] = value
+                new_du_cell["pusch"] = pusch_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU PUSCH config extensions: {e}")
+
+            try:
+                pucch_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_pucch_extensions"].items():
+                    pucch_fields[key] = value
+                new_du_cell["pucch"] = pucch_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU PUCCH config extensions: {e}")
+
+            try:
+                csi_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_csi_extensions"].items():
+                    csi_fields[key] = value
+                new_du_cell["csi"] = csi_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU CSI config extensions: {e}")
+
+            try:
+                srs_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_srs_extensions"].items():
+                    srs_fields[key] = value
+                new_du_cell["srs"] = srs_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU SRS config extensions: {e}")
+
+            try:
+                pdcch_common = nc_cell_extension["ocudu_nrcelldu_pdcch_extensions"]["common"]
+                # Emit pdcch.common as a YAML flow mapping so the template's 2-level loop renders correctly.
+                new_du_cell["pdcch"] = {"common": "{ss1_n_candidates: " + pdcch_common["ss1_n_candidates"] + "}"}
+            except (KeyError, TypeError) as e:
+                logging.warning(f"Couldn't extract OCUDU PDCCH config extensions: {e}")
+
+            try:
                 for key, value in nc_cell_extension["ocudu_nrcelldu_base_extensions"].items():
                     if "scs" in key:
                         value = "".join(filter(str.isdigit, value))
