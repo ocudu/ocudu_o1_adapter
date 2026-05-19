@@ -4,7 +4,8 @@
 """Application state shared across tasks."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict
 
 
 @dataclass()
@@ -19,5 +20,8 @@ class AppState:
     ws_received_queue: asyncio.Queue[dict] = asyncio.Queue()  # incoming WS messages
 
     ptp_stats_queue: asyncio.Queue[dict] = asyncio.Queue()  # PTP stats updates
+
+    pm_metrics_queue: asyncio.Queue = asyncio.Queue()  # (target, envelope) tuples awaiting HTTP push
+    pm_jobs: Dict[str, dict] = field(default_factory=dict)  # PerfMetricJob id -> attrs
 
     restart_req = False
