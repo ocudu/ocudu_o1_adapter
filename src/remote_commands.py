@@ -58,6 +58,10 @@ class WsRemoteCommands:
         """
         return self._send_ws_message({"cmd": "quit"})
 
+    def send_metrics_subscribe(self) -> Any:
+        """Request the gNB to (re-)emit its metric snapshot."""
+        return self._send_ws_message({"cmd": "metrics_subscribe"})
+
     def _send_ws_message(self, command: Dict) -> Any:
         # Put quit command on WS queue and return
         self.send_queue.put_nowait(json.dumps(command))
