@@ -33,7 +33,7 @@ class ConfigManager:
         template_filename (str): The filename of the template used for rendering the configuration file.
     """
 
-    _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio"]
+    _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio", "PerfMetricJob"]
     _FULL_RESTART_TIMEOUT = 30
 
     def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename, ru_forward_enabled, profile="gnb"):
@@ -208,6 +208,12 @@ class ConfigManager:
         # Store config
         self.last_config = raw_config
 
+        prev_active = self._active_stream_ids(self.state.pm_jobs)
+        self.state.pm_jobs = self._extract_perf_metric_jobs(raw_config)
+        # Newly-active jobs need a fresh snapshot from the gNB (one-shot on subscribe).
+        if self._active_stream_ids(self.state.pm_jobs) - prev_active:
+            self._ws.send_metrics_subscribe()
+
         if not self._render_enabled:
             self._enqueue_ru_forward_update(raw_xml)
             return True
@@ -308,6 +314,47 @@ class ConfigManager:
         if dropped:
             logging.debug(f"Dropped {dropped} stale RU forwarding update(s)")
         logging.debug("Queued RU forwarding update")
+
+    @staticmethod
+    def _active_stream_ids(jobs: dict) -> set:
+        return {
+            jid for jid, job in jobs.items()
+            if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
+        }
+
+    @staticmethod
+    def _extract_perf_metric_jobs(raw_config) -> dict:
+        """Walk ManagedElement/<NF>/PerfMetricJob and return id -> normalised job dict
+        (administrativeState, performanceMetrics list, granularityPeriod int, streamTarget,
+        nf_key, nf_instance_id, plmn_id)."""
+        jobs: dict = {}
+        managed_element = raw_config.get("data", {}).get("ManagedElement", {}) or {}
+        nf_instance_id = managed_element.get("@id") or managed_element.get("id") or "unknown"
+        for nf_key in ("GNBDUFunction", "GNBCUCPFunction", "GNBCUUPFunction"):
+            nf = managed_element.get(nf_key)
+            if not nf:
+                continue
+            plmn_attrs = (nf.get("attributes", {}) or {}).get("pLMNId", {}) or {}
+            plmn_id = (plmn_attrs.get("mcc") or "") + (plmn_attrs.get("mnc") or "")
+            for entry in ConfigManager._ensure_list(nf.get("PerfMetricJob")):
+                job_id = entry.get("id")
+                if not job_id:
+                    continue
+                attrs = entry.get("attributes", {}) or {}
+                try:
+                    granularity = int(attrs.get("granularityPeriod", 1))
+                except (TypeError, ValueError):
+                    granularity = 1
+                jobs[job_id] = {
+                    "administrativeState": attrs.get("administrativeState", "LOCKED"),
+                    "performanceMetrics": ConfigManager._ensure_list(attrs.get("performanceMetrics")),
+                    "granularityPeriod": granularity,
+                    "streamTarget": attrs.get("streamTarget"),
+                    "nf_key": nf_key,
+                    "nf_instance_id": nf_instance_id,
+                    "plmn_id": plmn_id,
+                }
+        return jobs
 
     def _extract_cucp_config(self, raw_config, du_cells=None):
         cucp_config = {}
