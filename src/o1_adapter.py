@@ -20,7 +20,9 @@ import json
 import logging
 import threading
 from contextlib import suppress
+from datetime import datetime, timezone
 
+import aiohttp
 import websockets
 from flask import Flask, jsonify
 from ncclient import manager
@@ -41,11 +43,82 @@ RETRY_INTERVAL = 5  # seconds
 WORKER_SLEEP_INTERVAL = 5  # seconds
 
 
-# TODO: WS message handler processing
-async def handle_ws_message(msg: str):
+def _collect_scalars(prefix: str, value, out: list) -> None:
+    """Walk a nested dict; append {name: <prefix.path>, value: v} for each numeric leaf.
+
+    Lists and strings are skipped; bool is treated as non-numeric.
     """
-    Dispatch WS messages by component type.
-    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        out.append({"name": prefix, "value": value})
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            child = f"{prefix}.{k}" if prefix else str(k)
+            _collect_scalars(child, v, out)
+
+
+def _flatten_metrics(data: dict) -> list:
+    """Flatten the gNB WS metric payload into a list of {name, value} entries."""
+    out = []
+    cells = data.get("cells")
+    if isinstance(cells, list):
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            cell_id = cell.get("cellId")
+            for name, value in cell.items():
+                if name == "cellId":
+                    continue
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    out.append({"name": name, "value": value, "cellId": cell_id})
+            cell_metrics = cell.get("cell_metrics")
+            if isinstance(cell_metrics, dict):
+                _collect_scalars("cells.cell_metrics", cell_metrics, out)
+            ue_list = cell.get("ue_list")
+            if isinstance(ue_list, list):
+                for ue in ue_list:
+                    if isinstance(ue, dict):
+                        _collect_scalars("cells.ue_list", ue, out)
+
+    for top_key in ("rlc_metrics", "app_resource_usage", "buffer_pool", "du_low"):
+        block = data.get(top_key)
+        if isinstance(block, dict):
+            _collect_scalars(top_key, block, out)
+
+    pdcp = (data.get("cu-up") or {}).get("pdcp")
+    if isinstance(pdcp, dict):
+        _collect_scalars("cu-up.pdcp", pdcp, out)
+
+    mac_dl = (((data.get("du") or {}).get("du_high") or {}).get("mac") or {}).get("dl")
+    if isinstance(mac_dl, list):
+        for entry in mac_dl:
+            if isinstance(entry, dict):
+                _collect_scalars("du.du_high.mac.dl", entry, out)
+
+    return out
+
+
+def _build_pm_envelope(profile: str, job_id: str, job: dict, metrics: list) -> dict:
+    """Construct a JSON envelope for the PM stream per the agreed schema."""
+    return {
+        "nfType": profile,
+        "nfInstanceId": job.get("nf_instance_id", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "granularityPeriod": job.get("granularityPeriod", 1),
+        "measuredObject": {
+            "objectType": job.get("nf_key", ""),
+            "objectId": job.get("nf_instance_id", "unknown"),
+            "plmnId": job.get("plmn_id", ""),
+        },
+        "metrics": metrics,
+        "jobId": job_id,
+    }
+
+
+async def handle_ws_message(msg: str, state: AppState, profile: str = "gnb"):
+    """Dispatch WS messages by component type, and stream PM envelopes when configured."""
     try:
         data = json.loads(msg)
     except json.JSONDecodeError:
@@ -67,6 +140,42 @@ async def handle_ws_message(msg: str):
 
     if data.get("cells"):
         logging.debug(f"WS cell metrics: {data['cells']}")
+
+    active_jobs = {
+        job_id: job
+        for job_id, job in state.pm_jobs.items()
+        if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
+    }
+    if not active_jobs:
+        return
+
+    metrics = _flatten_metrics(data)
+    if not metrics:
+        return
+
+    for job_id, job in active_jobs.items():
+        envelope = _build_pm_envelope(profile, job_id, job, metrics)
+        state.pm_metrics_queue.put_nowait((job["streamTarget"], envelope))
+
+
+async def pm_metrics_pusher(state: AppState):
+    """Consume pm_metrics_queue and POST each envelope to its configured streamTarget."""
+    async with aiohttp.ClientSession() as session:
+        while True:
+            target, envelope = await state.pm_metrics_queue.get()
+            try:
+                try:
+                    async with session.post(
+                        target,
+                        json=envelope,
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as resp:
+                        if resp.status >= 400:
+                            logging.warning(f"PM push to {target} returned {resp.status}")
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logging.warning(f"PM push to {target} failed: {e}")
+            finally:
+                state.pm_metrics_queue.task_done()
 
 
 def configure_app(state: AppState, auto_heal=False):
@@ -239,7 +348,7 @@ async def ws_handler(state: AppState, args, alarm_mgr):
                 async def receiver():
                     try:
                         async for msg in ws:
-                            await handle_ws_message(msg)
+                            await handle_ws_message(msg, state, args.profile)
                     except websockets.exceptions.ConnectionClosed:
                         return
 
@@ -302,6 +411,7 @@ async def orchestrator(args, alarm_mgr):
         netconf_main(state, args, alarm_mgr, ru_forwarder),
         ru_forwarder.run() if ru_forwarder else asyncio.sleep(0),
         ws_handler(state, args, alarm_mgr),
+        pm_metrics_pusher(state),
         ptp_log_monitor(args.ptp_log, state.ptp_stats_queue) if args.ptp_log else asyncio.sleep(0),
         (
             ptp_health_checker_consumer(
