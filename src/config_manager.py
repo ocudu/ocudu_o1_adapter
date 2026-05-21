@@ -15,8 +15,7 @@ from jinja2 import Environment, exceptions as jinja2_exceptions, FileSystemLoade
 from remote_commands import WsRemoteCommands
 from state import AppState
 
-RETRY_INTERVAL = 5  # seconds
-WORKER_SLEEP_INTERVAL = 5  # seconds
+WORKER_SLEEP_INTERVAL = 1  # seconds
 
 
 # pylint: disable=too-many-instance-attributes,logging-fstring-interpolation,too-many-arguments,too-many-positional-arguments
@@ -88,12 +87,12 @@ class ConfigManager:
         if runtime_updatable:
             logging.debug("Only runtime updatable parameters changed, no need to restart application")
             self.update_runtime_config(raw_config, diff)
+            self.write_full_config(raw_config, raw_xml)
         else:
             logging.debug("Full restart needed, sending quit cmd")
             await self._full_restart()
-
-        # Write full config to file
-        self.write_full_config(raw_config, raw_xml)
+            # _full_restart blocks until WS reconnects; netconf may have changed meanwhile, so refetch.
+            self.write_full_config(None)
 
     async def _full_restart(self):
         if not self._ws.send_quit_command():
