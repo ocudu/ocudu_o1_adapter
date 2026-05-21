@@ -40,23 +40,81 @@ from ves import VesMessages
 app = Flask(__name__)
 
 RETRY_INTERVAL = 5  # seconds
-WORKER_SLEEP_INTERVAL = 5  # seconds
+
+
+# 1:1 gNB scalar -> 3GPP KPI rename + rescale (TS 28.554). Aggregated KPIs live in
+# _derived_kpis. Note: spec §6.4.2 spells "VirtualResUtilization" as "VirtualResUtilizaiton";
+# we emit the corrected form.
+_KPI_MAPPINGS: dict[str, tuple[str, float]] = {
+    "cu-up.pdcp.dl.average_latency_us": ("DLDelay_gNBCUUP", 0.01),
+    "cu-up.pdcp.ul.average_latency_us": ("ULDelay_gNBCUUP", 0.01),
+    "app_resource_usage.cpu_usage_percent": ("VirtualResUtilization", 1.0),
+}
 
 
 def _collect_scalars(prefix: str, value, out: list) -> None:
     """Walk a nested dict; append {name: <prefix.path>, value: v} for each numeric leaf.
 
-    Lists and strings are skipped; bool is treated as non-numeric.
+    Lists and strings are skipped; bool is treated as non-numeric. Names in _KPI_MAPPINGS
+    are rewritten and rescaled.
     """
     if isinstance(value, bool):
         return
     if isinstance(value, (int, float)):
-        out.append({"name": prefix, "value": value})
+        mapping = _KPI_MAPPINGS.get(prefix)
+        if mapping is None:
+            out.append({"name": prefix, "value": value})
+        else:
+            kpi_name, scale = mapping
+            out.append({"name": kpi_name, "value": value * scale})
         return
     if isinstance(value, dict):
         for k, v in value.items():
             child = f"{prefix}.{k}" if prefix else str(k)
             _collect_scalars(child, v, out)
+
+
+def _derived_kpis(data: dict) -> list:
+    """Aggregated 3GPP KPIs; entries whose source fields are absent are skipped."""
+    out = []
+
+    dl_samples, ul_samples = [], []
+    for cell in data.get("cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        for ue in cell.get("ue_list") or []:
+            if not isinstance(ue, dict):
+                continue
+            if isinstance(ue.get("dl_brate"), (int, float)):
+                dl_samples.append(ue["dl_brate"])
+            if isinstance(ue.get("ul_brate"), (int, float)):
+                ul_samples.append(ue["ul_brate"])
+    if dl_samples:
+        out.append({"name": "DlUeThroughput_Cell", "value": sum(dl_samples) / len(dl_samples) / 1000.0})
+    if ul_samples:
+        out.append({"name": "UlUeThroughput_Cell", "value": sum(ul_samples) / len(ul_samples) / 1000.0})
+
+    # DLLat_gNB-DU: TS 28.554 §6.3.1.1 restricts this to packets arriving with an empty
+    # DL queue. The source field sum_sdu_latency_us accumulates over every SDU, so under
+    # load this value drifts above the spec quantity.
+    tx = (data.get("rlc_metrics") or {}).get("tx") or {}
+    sdus = tx.get("num_sdus")
+    if isinstance(sdus, (int, float)) and sdus > 0:
+        total_us = tx.get("sum_sdu_latency_us")
+        if isinstance(total_us, (int, float)):
+            out.append({"name": "DLLat_gNB-DU", "value": (total_us / sdus) * 0.01})
+        dropped = tx.get("num_dropped_sdus") or 0
+        discarded = tx.get("num_discarded_sdus") or 0
+        out.append({"name": "DLRelPSR_Uu", "value": 100.0 * (1.0 - (dropped + discarded) / sdus)})
+
+    rx = (data.get("rlc_metrics") or {}).get("rx") or {}
+    pdus = rx.get("num_pdus")
+    if isinstance(pdus, (int, float)) and pdus > 0:
+        lost = rx.get("num_lost_pdus") or 0
+        malformed = rx.get("num_malformed_pdus") or 0
+        out.append({"name": "ULRelPSR_Uu", "value": 100.0 * (1.0 - (lost + malformed) / pdus)})
+
+    return out
 
 
 def _flatten_metrics(data: dict) -> list:
@@ -97,6 +155,7 @@ def _flatten_metrics(data: dict) -> list:
             if isinstance(entry, dict):
                 _collect_scalars("du.du_high.mac.dl", entry, out)
 
+    out.extend(_derived_kpis(data))
     return out
 
 
@@ -154,7 +213,11 @@ async def handle_ws_message(msg: str, state: AppState, profile: str = "gnb"):
         return
 
     for job_id, job in active_jobs.items():
-        envelope = _build_pm_envelope(profile, job_id, job, metrics)
+        allowed = set(job.get("performanceMetrics") or [])
+        job_metrics = [m for m in metrics if m.get("name") in allowed] if allowed else metrics
+        if not job_metrics:
+            continue
+        envelope = _build_pm_envelope(profile, job_id, job, job_metrics)
         state.pm_metrics_queue.put_nowait((job["streamTarget"], envelope))
 
 
