@@ -593,8 +593,12 @@ class ConfigManager:
         try:
             attrs = nc_cuup["EP_E1"]["attributes"]
             cuup_config["e1ap"] = {
-                "addrs": attrs["remoteAddress"],
-                "bind_addrs": attrs["localAddress"]["ipAddress"],
+                "gateways": [
+                    {
+                        "addrs": attrs["remoteAddress"],
+                        "bind_addrs": attrs["localAddress"]["ipAddress"],
+                    }
+                ]
             }
         except KeyError:
             pass

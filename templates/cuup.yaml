@@ -4,8 +4,11 @@
 {% include "_cu_up.yaml" %}
 {% if cuup_config.e1ap is defined %}
   e1ap:
-    addrs: {{ cuup_config.e1ap.addrs }}
-    bind_addrs: {{ cuup_config.e1ap.bind_addrs }}
+    gateways:
+{%- for gw in cuup_config.e1ap.gateways %}
+      - bind_addrs: {{ gw.bind_addrs }}
+        addrs: {{ gw.addrs }}
+{%- endfor %}
 {% endif %}
 
 {% include "_trailer.yaml" %}
