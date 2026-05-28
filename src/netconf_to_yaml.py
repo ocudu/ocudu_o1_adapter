@@ -61,6 +61,55 @@ def _coerce_xml_value(value):
     return value
 
 
+def extract_top_level_config(raw_config):
+    """Extract top-level identifiers from the 3GPP YANG attributes.
+
+    Extracted keys: gnb_id, gnb_id_bit_length, ran_node_name, gnb_cu_up_id, gnb_du_id.
+
+    gNBId/gNBIdLength are duplicated on every function (CU-CP/CU-UP/DU). Their cross-function
+    equality is enforced by the gnb-id-consistency YANG deviation, so we just take the first
+    function we find them on.
+    """
+    header = {}
+    managed_element = raw_config.get("data", {}).get("ManagedElement", {})
+
+    for func_key in ("GNBCUCPFunction", "GNBCUUPFunction", "GNBDUFunction"):
+        try:
+            attrs = managed_element[func_key]["attributes"]
+        except (KeyError, TypeError):
+            continue
+        if "gNBId" in attrs:
+            header["gnb_id"] = int(attrs["gNBId"])
+        if "gNBIdLength" in attrs:
+            header["gnb_id_bit_length"] = int(attrs["gNBIdLength"])
+        if "gnb_id" in header and "gnb_id_bit_length" in header:
+            break
+
+    try:
+        name = managed_element["GNBCUCPFunction"]["attributes"].get("gNBCUName")
+        if name:
+            header["ran_node_name"] = name
+    except (KeyError, TypeError):
+        pass
+
+    try:
+        cu_up_id = managed_element["GNBCUUPFunction"]["attributes"].get("gNBCUUPId")
+        if cu_up_id is not None:
+            header["gnb_cu_up_id"] = int(cu_up_id)
+    except (KeyError, TypeError):
+        pass
+
+    try:
+        du_attrs = managed_element["GNBDUFunction"]["attributes"]
+        du_id = du_attrs.get("gNBDUId")
+        if du_id is not None:
+            header["gnb_du_id"] = int(du_id)
+    except (KeyError, TypeError):
+        pass
+
+    return header
+
+
 def get_du_cell_config(raw_config):
     """
     Extracts the full set of configuration parameters for each DU cell from the raw NETCONF configuration.

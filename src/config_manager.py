@@ -26,6 +26,7 @@ from netconf_to_yaml import (
     extract_perf_metric_jobs,
     extract_rrm_policy_ratio_config,
     extract_ssb_runtime_config,
+    extract_top_level_config,
 )
 from remote_commands import WsRemoteCommands
 from state import AppState
@@ -189,6 +190,7 @@ class ConfigManager:
             self._enqueue_ru_forward_update(raw_xml)
             return True
 
+        top_level_config = extract_top_level_config(raw_config)
         ofh_cell_config, du_cell_config = extract_cells_config(raw_config)
         cell_config = extract_cell_config(raw_config, du_cell_config)
         cucp_config = extract_cucp_config(raw_config, du_cell_config)
@@ -289,6 +291,7 @@ class ConfigManager:
             environment = Environment(loader=FileSystemLoader("templates/"))
             template = environment.get_template(self.template_filename)
             content = template.render(
+                top_level_config=top_level_config,
                 ofh_cells=ofh_cell_config,
                 du_cells=du_cell_config,
                 cucp_config=cucp_config,
