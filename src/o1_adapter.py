@@ -441,6 +441,13 @@ if __name__ == "__main__":
         help="VES password",
     )
     parser.add_argument(
+        "--ves_scheme",
+        type=str,
+        default="https",
+        choices=["http", "https"],
+        help="VES connection scheme (http or https)",
+    )
+    parser.add_argument(
         "--oam_ipv4_address",
         type=str,
         default="11.22.33.44",
@@ -527,6 +534,7 @@ if __name__ == "__main__":
         port=cmd_args.ves_port,
         username=cmd_args.ves_username,
         password=cmd_args.ves_password,
+        scheme=cmd_args.ves_scheme,
         logging=logging,
     )
     if cmd_args.registration:

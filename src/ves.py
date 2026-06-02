@@ -39,6 +39,7 @@ class VesMessages:
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def __init__(
         self,
+        scheme,
         host="localhost",
         port="8443",
         username="sample1",
@@ -46,7 +47,7 @@ class VesMessages:
         oam_ipv4_address="11.22.33.44",
         logging=None,
     ):
-        self.url_ves = f"https://{host}:{port}/eventListener/v7"
+        self.url_ves = f"{scheme}://{host}:{port}/eventListener/v7"
         self.username = username
         self.password = password
 
