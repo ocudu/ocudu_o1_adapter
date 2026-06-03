@@ -77,6 +77,10 @@ cell_cfg:
   {% endif -%}
   {% endfor %}
 
+{% if expert_phy_config %}
+expert_phy:{% for key, value in expert_phy_config.items() %}
+  {{ key }}: {{ value }}{% endfor %}
+{% endif %}
 {% if testmode_config["enabled"] == "true" -%}
 test_mode:
   test_ue:{% for key, value in testmode_config.items() if "enabled" not in key %}
