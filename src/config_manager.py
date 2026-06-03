@@ -804,6 +804,11 @@ class ConfigManager:
             try:
                 pdsch_fields = {}
                 for key, value in nc_cell_extension["ocudu_nrcelldu_pdsch_extensions"].items():
+                    if key == "rv_sequence":
+                        # Leaf-list: NETCONF returns a list (or a bare scalar for a single entry).
+                        # OCUDU expects a flow sequence of integers, e.g. [0, 2, 3, 1].
+                        rv_values = value if isinstance(value, list) else [value]
+                        value = [int(rv) for rv in rv_values]
                     pdsch_fields[key] = value
                 new_du_cell["pdsch"] = pdsch_fields
             except KeyError as e:
