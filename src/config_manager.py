@@ -776,9 +776,16 @@ class ConfigManager:
                 logging.warning(f"Couldn't extract OCUDU SRS config extensions: {e}")
 
             try:
-                pdcch_common = nc_cell_extension["ocudu_nrcelldu_pdcch_extensions"]["common"]
-                # Emit pdcch.common as a YAML flow mapping so the template's 2-level loop renders correctly.
-                new_du_cell["pdcch"] = {"common": "{ss1_n_candidates: " + pdcch_common["ss1_n_candidates"] + "}"}
+                pdcch_ext = nc_cell_extension["ocudu_nrcelldu_pdcch_extensions"]
+                # Emit each pdcch sub-container as a YAML flow mapping so the template's 2-level loop renders it.
+                pdcch_fields = {}
+                common = pdcch_ext.get("common")
+                if common:
+                    pdcch_fields["common"] = "{" + ", ".join(f"{k}: {v}" for k, v in common.items()) + "}"
+                dedicated = pdcch_ext.get("dedicated")
+                if dedicated:
+                    pdcch_fields["dedicated"] = "{" + ", ".join(f"{k}: {v}" for k, v in dedicated.items()) + "}"
+                new_du_cell["pdcch"] = pdcch_fields
             except (KeyError, TypeError) as e:
                 logging.warning(f"Couldn't extract OCUDU PDCCH config extensions: {e}")
 
