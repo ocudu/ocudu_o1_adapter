@@ -231,6 +231,7 @@ class ConfigManager:
         metrics_config = {}
         remote_control_config = {}
         pcap_config = {}
+        ru_dummy_config = {}
 
         managed_element = raw_config.get("data", {}).get("ManagedElement", {})
         for func_key, ext_key in (
@@ -252,6 +253,9 @@ class ConfigManager:
             remote = ext.get("ocudu_remote_control_extensions")
             if remote is not None:
                 remote_control_config = remote
+            ru_dummy = ext.get("ocudu_ru_dummy_extensions")
+            if ru_dummy is not None:
+                ru_dummy_config = ru_dummy
 
             if not log_config:
                 log = ext.get("ocudu_log_extensions")
@@ -285,6 +289,7 @@ class ConfigManager:
                 remote_control_config=remote_control_config,
                 pcap_config=pcap_config,
                 cell_config=cell_config,
+                ru_dummy_config=ru_dummy_config,
             )
         except jinja2_exceptions.UndefinedError as e:
             logging.error(f"Template rendering error: {e}")

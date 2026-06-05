@@ -12,7 +12,8 @@ ru_ofh:
     {% endfor %}
   {% endfor %}
 {% else %}
-ru_dummy:
+ru_dummy:{% for key, value in ru_dummy_config.items() %}
+  {{ key }}: {{ value }}{% endfor %}
 {% endif %}
 
 hal:
