@@ -793,6 +793,30 @@ class ConfigManager:
                 new_du_cell["mac_cell_group"] = mcg_fields
             except (KeyError, TypeError) as e:
                 logging.warning(f"Couldn't extract OCUDU MAC cell group config extensions: {e}")
+                sib_ext = nc_cell_extension["ocudu_nrcelldu_sib_extensions"]
+                sib_fields = {}
+                for key, value in sib_ext.items():
+                    if key in ("etws", "cmas"):
+                        # Nested sub-container -> YAML flow mapping so the template's 2-level loop renders it.
+                        sib_fields[key] = "{" + ", ".join(f"{k}: {v}" for k, v in value.items()) + "}"
+                    elif key == "si_sched_info":
+                        # List of SI-message entries -> flow sequence of flow mappings. Drop the ordering key
+                        # and render the sib_mapping leaf-list as an inline integer list.
+                        entries = value if isinstance(value, list) else [value]
+                        rendered = []
+                        for entry in entries:
+                            fields = {k: v for k, v in entry.items() if k != "id"}
+                            mapping = fields.get("sib_mapping")
+                            if mapping is not None:
+                                mapping = mapping if isinstance(mapping, list) else [mapping]
+                                fields["sib_mapping"] = "[" + ", ".join(str(int(m)) for m in mapping) + "]"
+                            rendered.append("{" + ", ".join(f"{k}: {v}" for k, v in fields.items()) + "}")
+                        sib_fields[key] = "[" + ", ".join(rendered) + "]"
+                    else:
+                        sib_fields[key] = value
+                new_du_cell["sib"] = sib_fields
+            except (KeyError, TypeError) as e:
+                logging.warning(f"Couldn't extract OCUDU SIB config extensions: {e}")
 
             try:
                 for key, value in nc_cell_extension["ocudu_nrcelldu_base_extensions"].items():
