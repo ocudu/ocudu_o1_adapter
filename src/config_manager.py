@@ -778,6 +778,23 @@ class ConfigManager:
                 logging.warning(f"Couldn't extract OCUDU PDCCH config extensions: {e}")
 
             try:
+                mcg_ext = nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"]
+                # Emit each mac_cell_group sub-container as a YAML flow mapping so the template's 2-level loop renders it.
+                mcg_fields = {}
+                bsr_cfg = mcg_ext.get("bsr_cfg")
+                if bsr_cfg:
+                    mcg_fields["bsr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in bsr_cfg.items()) + "}"
+                phr_cfg = mcg_ext.get("phr_cfg")
+                if phr_cfg:
+                    mcg_fields["phr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in phr_cfg.items()) + "}"
+                sr_cfg = mcg_ext.get("sr_cfg")
+                if sr_cfg:
+                    mcg_fields["sr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in sr_cfg.items()) + "}"
+                new_du_cell["mac_cell_group"] = mcg_fields
+            except (KeyError, TypeError) as e:
+                logging.warning(f"Couldn't extract OCUDU MAC cell group config extensions: {e}")
+
+            try:
                 for key, value in nc_cell_extension["ocudu_nrcelldu_base_extensions"].items():
                     if "scs" in key:
                         value = "".join(filter(str.isdigit, value))
