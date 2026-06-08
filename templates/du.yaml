@@ -16,6 +16,7 @@ ru_dummy:{% for key, value in ru_dummy_config.items() %}
   {{ key }}: {{ value }}{% endfor %}
 {% endif %}
 
+{% if hal_config %}
 hal:
 {% if hal_config.get("bbdev_hwacc") %}
   bbdev_hwacc:{% for key, value in hal_config.bbdev_hwacc.items() if key not in ["pdsch_enc", "pusch_dec"] %}
@@ -32,6 +33,7 @@ hal:
 {% for key, value in hal_config.items() if key != "bbdev_hwacc" %}
   {{ key }}: {{ value }}
 {% endfor %}
+{% endif %}
 
 cells:
 {% for dict_item in du_cells -%}
