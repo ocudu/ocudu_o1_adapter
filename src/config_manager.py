@@ -130,6 +130,7 @@ class ConfigManager:
                     nc_cell_extension = cell["attributes"]["ocudu_nrcelldu_extensions"]
                 except KeyError as e:
                     logging.warning(f"Couldn't extract OCUDU nrcelldu config extensions: {e}")
+                    nc_cell_extension = {}
 
                 # build DU cell struct to overwrite common cell_cfg fields with individual values
                 new_du_cell = {}
@@ -693,6 +694,7 @@ class ConfigManager:
                 nc_cell_extension = cell["attributes"]["ocudu_nrcelldu_extensions"]
             except KeyError as e:
                 logging.warning(f"Couldn't extract OCUDU nrcelldu config extensions: {e}")
+                nc_cell_extension = {}
 
             # Extract custom ocudu extensions
             try:
@@ -805,6 +807,8 @@ class ConfigManager:
                 new_du_cell["mac_cell_group"] = mcg_fields
             except (KeyError, TypeError) as e:
                 logging.warning(f"Couldn't extract OCUDU MAC cell group config extensions: {e}")
+
+            try:
                 sib_ext = nc_cell_extension["ocudu_nrcelldu_sib_extensions"]
                 sib_fields = {}
                 for key, value in sib_ext.items():
@@ -838,17 +842,21 @@ class ConfigManager:
             except KeyError as e:
                 logging.warning(f"Couldn't extract OCUDU cell base extensions: {e}")
 
-            # Extract values from standard attributes
-            new_du_cell.update(
-                {
-                    "pci": cell["attributes"]["nRPCI"],
-                    "tac": cell["attributes"]["nRTAC"],
-                    "dl_arfcn": cell["attributes"]["arfcnDL"],
-                    "channel_bandwidth_MHz": cell["attributes"]["bSChannelBwDL"],
-                    "plmn": cell["attributes"]["pLMNInfoList"]["mcc"] + cell["attributes"]["pLMNInfoList"]["mnc"],
-                    "enabled": cell["attributes"]["administrativeState"] != "LOCKED",
-                }
-            )
+            # Standard attributes. nRTAC/bSChannelBwDL are optional and administrativeState defaults
+            # to LOCKED (and may be omitted by get-config), so guard the block and use that default.
+            try:
+                new_du_cell.update(
+                    {
+                        "pci": cell["attributes"]["nRPCI"],
+                        "tac": cell["attributes"]["nRTAC"],
+                        "dl_arfcn": cell["attributes"]["arfcnDL"],
+                        "channel_bandwidth_MHz": cell["attributes"]["bSChannelBwDL"],
+                        "plmn": cell["attributes"]["pLMNInfoList"]["mcc"] + cell["attributes"]["pLMNInfoList"]["mnc"],
+                        "enabled": cell["attributes"].get("administrativeState", "LOCKED") != "LOCKED",
+                    }
+                )
+            except KeyError as e:
+                logging.warning(f"Couldn't extract NRCellDU standard attributes: {e}")
             du_cell_config.append(new_du_cell)
         return ofh_cell_config, du_cell_config
 
