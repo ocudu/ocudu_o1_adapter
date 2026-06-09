@@ -46,6 +46,7 @@ class ConfigManager:
         self._ws = WsRemoteCommands(state.ws_send_queue)  # Inject shared WS send queue
         self._ru_forward_enabled = ru_forward_enabled
         self._render_enabled = profile != "ru"
+        self._profile = profile
 
     async def process_config_update(self):
         """
@@ -223,6 +224,21 @@ class ConfigManager:
         cucp_config = self._extract_cucp_config(raw_config, du_cell_config)
         cuup_config = self._extract_cuup_config(raw_config)
 
+        # DU F1-C connect address (standalone 'du' app only; gnb/cu wire F1 in-process). The DU is
+        # the F1-C client: EP_F1C remoteAddress -> f1ap.addrs, localAddress -> f1ap.bind_addrs.
+        f1ap_config = {}
+        if self._profile == "du":
+            try:
+                ep_f1c = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1C"]["attributes"]
+                f1ap_config = {
+                    "addrs": ep_f1c["remoteAddress"],
+                    "bind_addrs": ep_f1c["localAddress"]["ipAddress"],
+                }
+            except KeyError as e:
+                logging.warning(f"Couldn't extract DU F1-C config: {e}")
+            except socket.gaierror as e:
+                logging.warning(f"Couldn't resolve DU F1-C remoteAddress: {e}")
+
         # Function extensions (DU/CU-CP/CU-UP). testmode/hal/remote_control live only on
         # the DU; log lives on any function (first-wins); pcap entries are merged across
         # all functions; metrics_extensions is now per-function and gets merged
@@ -291,6 +307,7 @@ class ConfigManager:
                 pcap_config=pcap_config,
                 cell_config=cell_config,
                 ru_dummy_config=ru_dummy_config,
+                f1ap_config=f1ap_config,
             )
         except jinja2_exceptions.UndefinedError as e:
             logging.error(f"Template rendering error: {e}")
