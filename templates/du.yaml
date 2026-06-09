@@ -77,4 +77,9 @@ test_mode:
   test_ue:{% for key, value in testmode_config.items() if "enabled" not in key %}
     {{ key }}: {{ value }}{% endfor %}
 {% endif %}
+{% if f1ap_config -%}
+f1ap:
+  addrs: {{ f1ap_config.addrs }}
+  bind_addrs: {{ f1ap_config.bind_addrs }}
+{% endif %}
 {% include "_trailer.yaml" %}
