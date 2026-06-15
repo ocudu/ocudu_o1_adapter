@@ -817,6 +817,14 @@ class ConfigManager:
                 logging.warning(f"Couldn't extract OCUDU paging config extensions: {e}")
 
             try:
+                drx_fields = {}
+                for key, value in nc_cell_extension["ocudu_nrcelldu_drx_extensions"].items():
+                    drx_fields[key] = value
+                new_du_cell["drx"] = drx_fields
+            except KeyError as e:
+                logging.warning(f"Couldn't extract OCUDU DRX config extensions: {e}")
+
+            try:
                 mcg_ext = nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"]
                 # Emit each mac_cell_group sub-container as a YAML flow mapping so the template's 2-level loop renders it.
                 mcg_fields = {}
