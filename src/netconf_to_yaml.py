@@ -374,10 +374,38 @@ def extract_cells_config(raw_config):
             logging.warning(f"Couldn't extract OCUDU DRX config extensions: {e}")
 
         try:
-            # Emit each mac_cell_group sub-container (bsr_cfg, phr_cfg, sr_cfg) as a YAML flow
-            # mapping so the template's 2-level loop renders it.
+            sched_ext = nc_cell_extension["ocudu_nrcelldu_scheduler_extensions"]
+            sched_fields = {}
+            if "nof_preselected_newtx_ues" in sched_ext:
+                sched_fields["nof_preselected_newtx_ues"] = sched_ext["nof_preselected_newtx_ues"]
+            # policy is a choice (qos_sched|rr_sched); emit as a nested YAML flow mapping.
+            policy = sched_ext.get("policy")
+            if policy:
+                qos_sched = policy.get("qos_sched")
+                if qos_sched:
+                    sched_fields["policy"] = (
+                        "{qos_sched: {" + ", ".join(f"{k}: {v}" for k, v in qos_sched.items()) + "}}"
+                    )
+                elif "rr_sched" in policy:
+                    sched_fields["policy"] = "{rr_sched: {}}"
+            new_du_cell["scheduler"] = sched_fields
+        except KeyError as e:
+            logging.warning(f"Couldn't extract OCUDU scheduler config extensions: {e}")
+
+        try:
+            ta_fields = {}
+            for key, value in nc_cell_extension["ocudu_nrcelldu_ta_extensions"].items():
+                ta_fields[key] = value
+            new_du_cell["ta"] = ta_fields
+        except KeyError as e:
+            logging.warning(f"Couldn't extract OCUDU TA config extensions: {e}")
+
+        try:
+            mcg_ext = nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"]
+            # Emit each mac_cell_group sub-container as a YAML flow mapping
+            # so the template's 2-level loop renders it.
             mcg_fields = {}
-            for key, value in nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"].items():
+            for key, value in mcg_ext.items():
                 if value:
                     mcg_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
             new_du_cell["mac_cell_group"] = mcg_fields
