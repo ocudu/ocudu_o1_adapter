@@ -82,4 +82,10 @@ f1ap:
   addrs: {{ f1ap_config.addrs }}
   bind_addrs: {{ f1ap_config.bind_addrs }}
 {% endif %}
+{% if f1u_config -%}
+f1u:
+  socket:
+{% for s in f1u_config.socket %}    - bind_addr: {{ s.bind_addr }}
+{% endfor %}
+{% endif %}
 {% include "_trailer.yaml" %}
