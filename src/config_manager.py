@@ -243,6 +243,13 @@ class ConfigManager:
             try:
                 ep_f1u = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1U"]["attributes"]
                 f1u_config = {"socket": [{"bind_addr": ep_f1u["localAddress"]["ipAddress"]}]}
+                # Optional GTP-U bind/peer UDP ports (OCUDU EP_F1U extension). When absent the
+                # gNB applies its own default (2152), so only emit them when explicitly set.
+                ports = ep_f1u.get("ocudu_ep_f1u_extensions") or {}
+                if "bind_port" in ports:
+                    f1u_config["bind_port"] = ports["bind_port"]
+                if "peer_port" in ports:
+                    f1u_config["peer_port"] = ports["peer_port"]
             except KeyError as e:
                 logging.warning(f"Couldn't extract DU F1-U config: {e}")
 
@@ -432,13 +439,19 @@ class ConfigManager:
             ]
 
             # Build AMF config subtree
+            ngc_attrs = nc_cucp_config["EP_NgC"]["attributes"]
             cucp_config = {
                 "amf": {
-                    "addrs": nc_cucp_config["EP_NgC"]["attributes"]["remoteAddress"],
-                    "bind_addrs": nc_cucp_config["EP_NgC"]["attributes"]["localAddress"]["ipAddress"],
+                    "addrs": ngc_attrs["remoteAddress"],
+                    "bind_addrs": ngc_attrs["localAddress"]["ipAddress"],
                     "supported_tracking_areas": supported_tracking_areas,
                 }
             }
+            # Optional NG-C/NGAP AMF SCTP port (OCUDU EP_NgC extension). When absent the gNB
+            # applies its own default (38412), so only emit it when explicitly set.
+            ngc_ext = ngc_attrs.get("ocudu_ep_ngc_extensions") or {}
+            if "port" in ngc_ext:
+                cucp_config["amf"]["port"] = ngc_ext["port"]
 
             for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
                 try:
@@ -636,10 +649,18 @@ class ConfigManager:
 
         for ep, key in (("EP_NgU", "ngu"), ("EP_F1U", "f1u")):
             try:
-                bind = nc_cuup[ep]["attributes"]["localAddress"]["ipAddress"]
-                cuup_config[key] = {"socket": [{"bind_addr": bind}]}
+                attrs = nc_cuup[ep]["attributes"]
+                cuup_config[key] = {"socket": [{"bind_addr": attrs["localAddress"]["ipAddress"]}]}
             except KeyError:
-                pass
+                continue
+            # F1-U carries optional GTP-U bind/peer UDP ports (OCUDU EP_F1U extension). When
+            # absent the gNB applies its own default (2152), so only emit them when set.
+            if ep == "EP_F1U":
+                ports = attrs.get("ocudu_ep_f1u_extensions") or {}
+                if "bind_port" in ports:
+                    cuup_config[key]["bind_port"] = ports["bind_port"]
+                if "peer_port" in ports:
+                    cuup_config[key]["peer_port"] = ports["peer_port"]
 
         return cuup_config
 
