@@ -11,7 +11,9 @@ cu_up:
 {% endif %}
 {% if cuup_config.f1u is defined %}
   f1u:
-    socket:
+{% if cuup_config.f1u.bind_port is defined %}    bind_port: {{ cuup_config.f1u.bind_port }}
+{% endif %}{% if cuup_config.f1u.peer_port is defined %}    peer_port: {{ cuup_config.f1u.peer_port }}
+{% endif %}    socket:
 {% for s in cuup_config.f1u.socket %}      - bind_addr: {{ s.bind_addr }}
 {% endfor %}
 {% endif %}

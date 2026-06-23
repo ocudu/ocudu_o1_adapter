@@ -84,7 +84,9 @@ f1ap:
 {% endif %}
 {% if f1u_config -%}
 f1u:
-  socket:
+{% if f1u_config.bind_port is defined %}  bind_port: {{ f1u_config.bind_port }}
+{% endif %}{% if f1u_config.peer_port is defined %}  peer_port: {{ f1u_config.peer_port }}
+{% endif %}  socket:
 {% for s in f1u_config.socket %}    - bind_addr: {{ s.bind_addr }}
 {% endfor %}
 {% endif %}
