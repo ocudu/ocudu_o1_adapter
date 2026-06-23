@@ -10,8 +10,10 @@ Usage:
     This module can be executed as a standalone script.
 """
 import argparse
+import errno
 import logging
 import sys
+import time
 from pathlib import Path
 import xml.dom.minidom
 import xml.etree.ElementTree as ET
@@ -229,6 +231,13 @@ if __name__ == "__main__":
     parser.add_argument("-u", "--username", type=str, default="root", help="SSH user")
     parser.add_argument("-p", "--password", type=str, default="M1!T1!mt", help="SSH pass")
     parser.add_argument("--port", type=int, default=830, help="Specify this if you want a non-default port")
+    parser.add_argument(
+        "--callhome",
+        action="store_true",
+        help="Wait for an inbound NETCONF call-home (RFC 8071) instead of connecting out",
+    )
+    parser.add_argument("--callhome-port", type=int, default=4334, help="TCP port to listen on for call-home")
+    parser.add_argument("--callhome-bind", type=str, default="0.0.0.0", help="Address to bind the call-home listener")
     parser.add_argument("-d", "--datastore", type=str, default="running", help="Datastore to use")
     parser.add_argument("--get_config", action="store_true", help="Get current RU config")
     parser.add_argument("--set_full_config", action="store_true", help="Set full RU config")
@@ -287,15 +296,46 @@ if __name__ == "__main__":
     if not args.dry_run:
         # Let's go
         try:
-            session = manager.connect(
-                host=args.host,
-                port=args.port,
-                username=args.username,
-                password=args.password,
-                hostkey_verify=False,
-                look_for_keys=False,
-                allow_agent=False,
-            )  # pylint: enable=duplicate-code
+            if args.callhome:
+                logging.info("Waiting for NETCONF call-home on %s:%d", args.callhome_bind, args.callhome_port)
+                while True:
+                    try:
+                        session = manager.call_home(
+                            host=args.callhome_bind,
+                            port=args.callhome_port,
+                            username=args.username,
+                            password=args.password,
+                            hostkey_verify=False,
+                            look_for_keys=False,
+                            allow_agent=False,
+                        )
+                        break
+                    except TimeoutError:
+                        # manager.call_home() uses a hard-coded 10s accept timeout, while the
+                        # O-RU re-call-home timer defaults to 60s, so a single accept would
+                        # usually time out first. Keep waiting for the O-RU to connect.
+                        logging.debug("call-home accept timed out, still waiting for the O-RU")
+                        continue
+                    except OSError as e:
+                        # manager.call_home() does not set SO_REUSEADDR and leaves the listening
+                        # socket open on failure, so a retry can hit EADDRINUSE until the previous
+                        # socket is released (ncclient issue #578). Wait briefly and retry; any
+                        # other OSError is unexpected and is re-raised.
+                        if e.errno != errno.EADDRINUSE:
+                            raise
+                        logging.debug("call-home port still in use (%s), retrying", e)
+                        time.sleep(1)
+                        continue
+            else:
+                session = manager.connect(
+                    host=args.host,
+                    port=args.port,
+                    username=args.username,
+                    password=args.password,
+                    hostkey_verify=False,
+                    look_for_keys=False,
+                    allow_agent=False,
+                )  # pylint: enable=duplicate-code
         except (ConnectionError, TimeoutError) as e:
             logging.error("Couldn't connect to sysrepo on RU: %s", e)
             sys.exit(1)
