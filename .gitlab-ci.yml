@@ -50,6 +50,8 @@ o1 integration tests downstream:
     # here we can not use the predefined variables ON_MR and ON_MR_TRAIN because
     # inheriting them in the parent pipeline will also pass them to the child pipeline
     # thus triggering the whole child pipeline instead of just o1 integration tests job
+    - if: $CI_MERGE_REQUEST_SOURCE_PROJECT_ID != $CI_MERGE_REQUEST_PROJECT_ID
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merge_train"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE == "merged_result"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
