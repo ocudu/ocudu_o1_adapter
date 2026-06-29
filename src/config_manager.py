@@ -406,12 +406,15 @@ class ConfigManager:
 
             plmn = nc_cucp_config["attributes"]["pLMNId"]["mcc"] + nc_cucp_config["attributes"]["pLMNId"]["mnc"]
 
-            tac = 7  # Not present in default YANG model it seems
-            if du_cells is not None:
-                for cell in du_cells:
-                    if cell["plmn"] == plmn:
-                        tac = cell["tac"]
-                        break
+            try:
+                tac = nc_cucp_config["ocudu_gnbcucpfunction_extensions"]["nRTAC"]
+            except (KeyError, TypeError):
+                tac = 7
+                if du_cells is not None:
+                    for cell in du_cells:
+                        if cell["plmn"] == plmn:
+                            tac = cell["tac"]
+                            break
 
             tai_slice_support_list = [{"sst": 1}]  # Default if RRMPolicyRatio is absent
             try:
