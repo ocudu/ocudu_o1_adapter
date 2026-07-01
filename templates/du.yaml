@@ -2,7 +2,12 @@
   SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
   SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -#}
-{% if ofh_cells %}
+{% if ru_sdr_config %}
+ru_sdr:{% for key, value in ru_sdr_config.items() %}{% if value is mapping %}
+  {{ key }}:{% for k2, v2 in value.items() %}
+    {{ k2 }}: {{ v2 }}{% endfor %}{% else %}
+  {{ key }}: {{ value }}{% endif %}{% endfor %}
+{% elif ofh_cells %}
 ru_ofh:
   cells:
   {% for dict_item in ofh_cells -%}
