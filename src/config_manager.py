@@ -671,6 +671,11 @@ class ConfigManager:
                 if "peer_port" in ports:
                     cuup_config[key]["peer_port"] = ports["peer_port"]
 
+        cuup_ext = nc_cuup.get("ocudu_gnbcuupfunction_extensions") or {}
+        test_mode = cuup_ext.get("ocudu_gnbcuupfunction_testmode_extensions")
+        if test_mode:
+            cuup_config["test_mode"] = test_mode
+
         return cuup_config
 
     @staticmethod
