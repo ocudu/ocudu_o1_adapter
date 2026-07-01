@@ -455,11 +455,12 @@ class ConfigManager:
                     "supported_tracking_areas": supported_tracking_areas,
                 }
             }
-            # Optional NG-C/NGAP AMF SCTP port (OCUDU EP_NgC extension). When absent the gNB
-            # applies its own default (38412), so only emit it when explicitly set.
+            # The OCUDU EP_NgC extension mirrors the remaining flat cu_cp.amf.* knobs (port,
+            # bind_interface, SCTP tuning, no_core, timeouts)
             ngc_ext = ngc_attrs.get("ocudu_ep_ngc_extensions") or {}
-            if "port" in ngc_ext:
-                cucp_config["amf"]["port"] = ngc_ext["port"]
+            for field, value in ngc_ext.items():
+                if not field.startswith("@"):  # skip xmltodict namespace attrs (@xmlns)
+                    cucp_config["amf"][field] = value
 
             for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
                 try:
