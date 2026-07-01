@@ -263,6 +263,7 @@ class ConfigManager:
         remote_control_config = {}
         pcap_config = {}
         ru_dummy_config = {}
+        ru_sdr_config = {}
 
         managed_element = raw_config.get("data", {}).get("ManagedElement", {})
         for func_key, ext_key in (
@@ -287,6 +288,9 @@ class ConfigManager:
             ru_dummy = ext.get("ocudu_ru_dummy_extensions")
             if ru_dummy is not None:
                 ru_dummy_config = ru_dummy
+            ru_sdr = ext.get("ocudu_ru_sdr_extensions")
+            if ru_sdr is not None:
+                ru_sdr_config = ru_sdr
 
             if not log_config:
                 log = ext.get("ocudu_log_extensions")
@@ -321,6 +325,7 @@ class ConfigManager:
                 pcap_config=pcap_config,
                 cell_config=cell_config,
                 ru_dummy_config=ru_dummy_config,
+                ru_sdr_config=ru_sdr_config,
                 f1ap_config=f1ap_config,
                 f1u_config=f1u_config,
             )
