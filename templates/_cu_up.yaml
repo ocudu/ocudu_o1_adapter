@@ -17,3 +17,8 @@ cu_up:
 {% for s in cuup_config.f1u.socket %}      - bind_addr: {{ s.bind_addr }}
 {% endfor %}
 {% endif %}
+{% if cuup_config.test_mode is defined %}
+  test_mode:
+{% for key, value in cuup_config.test_mode.items() %}    {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
