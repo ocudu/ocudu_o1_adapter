@@ -18,13 +18,15 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import ssl
 import threading
 from contextlib import suppress
 
 import websockets
 from flask import Flask, jsonify
 from ncclient import manager
-from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError
+from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, TLSError
 
 from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
@@ -95,16 +97,29 @@ async def try_connect(args, alarm_mgr):
         # run blocking ncclient call in a background thread
         def connect():
             # pylint: disable=duplicate-code
-            m = manager.connect(
-                host=args.netconf_host,
-                port=args.netconf_port,
-                username=args.netconf_username,
-                password=args.netconf_password,
-                hostkey_verify=False,
-                allow_agent=False,
-                look_for_keys=False,
-                timeout=RETRY_INTERVAL,
-            )
+            if args.netconf_tls:
+                cert_dir = args.netconf_tls_cert_dir
+                m = manager.connect_tls(
+                    host=args.netconf_host,
+                    port=args.netconf_tls_port,
+                    keyfile=os.path.join(cert_dir, "client.key"),
+                    certfile=os.path.join(cert_dir, "client.crt"),
+                    ca_certs=os.path.join(cert_dir, "ca.crt"),
+                    protocol=ssl.PROTOCOL_TLS_CLIENT,
+                    check_hostname=False,
+                    timeout=RETRY_INTERVAL,
+                )
+            else:
+                m = manager.connect(
+                    host=args.netconf_host,
+                    port=args.netconf_port,
+                    username=args.netconf_username,
+                    password=args.netconf_password,
+                    hostkey_verify=False,
+                    allow_agent=False,
+                    look_for_keys=False,
+                    timeout=RETRY_INTERVAL,
+                )
             # pylint: enable=duplicate-code
             logging.info("Connected to NETCONF server")
             alarm_mgr.clear_alarm(
@@ -119,6 +134,7 @@ async def try_connect(args, alarm_mgr):
         SSHError,
         AuthenticationError,
         SessionCloseError,
+        TLSError,  # TLS connect / handshake / cert failures (ncclient wraps ssl.SSLError)
     ) as e:
         logging.warning(f"NETCONF connection failed: {e}")
         alarm_mgr.set_alarm(
@@ -327,6 +343,23 @@ if __name__ == "__main__":
         type=str,
         default="root",
         help="SSH pass",
+    )
+    parser.add_argument(
+        "--netconf_tls",
+        action="store_true",
+        help="Connect to the NETCONF server over TLS (RFC 7589) instead of SSH",
+    )
+    parser.add_argument(
+        "--netconf_tls_port",
+        type=int,
+        default=6513,
+        help="NETCONF-over-TLS port",
+    )
+    parser.add_argument(
+        "--netconf_tls_cert_dir",
+        type=str,
+        default="/etc/netconf-tls-client",
+        help="Directory holding client.crt, client.key and ca.crt for NETCONF-over-TLS",
     )
     parser.add_argument(
         "--ru_forward",
