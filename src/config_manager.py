@@ -15,7 +15,11 @@ from jinja2 import Environment, exceptions as jinja2_exceptions, FileSystemLoade
 from remote_commands import WsRemoteCommands
 from state import AppState
 
-WORKER_SLEEP_INTERVAL = 1  # seconds
+# take_notification() blocks off the event loop and returns the instant ncclient
+# queues a server-pushed <notification>, so config changes are handled event-driven
+# with ~0 latency. This timeout is only a wake-up tick that lets the worker re-check
+# the stop event / connection state between notifications; it is not added latency.
+NOTIFICATION_TICK = 1  # seconds
 
 
 # pylint: disable=too-many-instance-attributes,logging-fstring-interpolation,too-many-arguments,too-many-positional-arguments
@@ -937,7 +941,13 @@ class ConfigManager:
         return ofh_cell_config, du_cell_config
 
     async def run(self, stop_event: asyncio.Event):
-        """Main run loop of the config manager worker."""
+        """Main run loop of the config manager worker.
+
+        Config changes are consumed event-driven: take_notification() waits on a
+        worker thread (so the event loop isn't blocked) and returns the instant
+        ncclient queues a server-pushed <notification>, so the change is processed
+        with essentially no latency and without polling the running config.
+        """
         logging.debug("Worker started")
         try:
             # Subscribe to notifications (default NETCONF stream)
@@ -952,32 +962,21 @@ class ConfigManager:
                     logging.info("NETCONF session no longer connected (worker)")
                     break
 
-                # Listen for notifications (non-blocking with timeout)
-                try:
-                    notif = self.netconf_manager.take_notification(timeout=1)
-                    if notif is not None:
-                        if "netconf-config-change" in notif.notification_xml:
-                            logging.debug("netconf-config-change notification received")
-                            # Queue event to update config
-                            await self.state.app_command_queue.put(notif)
+                # Wait for a notification on a worker thread so the event loop isn't
+                # blocked. A queued notification returns immediately; the tick timeout
+                # only bounds how fast we notice stop_event / a dropped connection
+                # between changes.
+                notif = await asyncio.to_thread(
+                    self.netconf_manager.take_notification, True, NOTIFICATION_TICK
+                )
+                if notif is None:
+                    continue
 
-                except ncclient.operations.TimeoutExpiredError:
-                    # timeout or transport closed
-                    pass
+                logging.info(f"NETCONF notification received:\n{notif.notification_xml}")
+                if "netconf-config-change" not in notif.notification_xml:
+                    continue
 
-                # Handle commands from main thread
-                try:
-                    cmd = self.state.app_command_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    cmd = None
-
-                if cmd:
-                    logging.debug("Processing config update")
-                    await self.process_config_update()
-
-                # Periodic heartbeat
-                logging.debug("Worker heartbeat")
-                await asyncio.sleep(WORKER_SLEEP_INTERVAL)
+                await self.process_config_update()
 
         finally:
             logging.debug("Worker stopped")
