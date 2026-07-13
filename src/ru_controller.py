@@ -24,11 +24,12 @@ from jinja2 import Environment, FileSystemLoader
 from ncclient import manager
 from ncclient.operations import rpc as rpc_ops
 from ncclient.transport import errors as transport_errors
+from ncclient.xml_ import to_ele
 
 from ofh_config_builder import build_ofh_config, print_ofh_config
 
 
-class RuConfig:
+class RuConfig:  # pylint: disable=too-many-public-methods
     """
     A class for configuring ORAN radio units over NETCONF/Mplane interface.
 
@@ -222,6 +223,49 @@ class RuConfig:
             return {}
         return parsed.get("rpc-reply", {}).get("data", {})
 
+    def _reset_supervision_watchdog(self, interval, guard):
+        """Send an o-ran-supervision supervision-watchdog-reset RPC.
+
+        interval maps to supervision-notification-interval and guard to
+        guard-timer-overhead; the O-RU arms its watchdog for interval + guard
+        seconds and returns next-update-at.
+        """
+        rendered = self._render_template(
+            "oran_supervision_watchdog_reset.xml", config={"interval": interval, "guard": guard}
+        )
+        reply = self.netconf_manager.dispatch(to_ele(rendered))
+        logging.debug("supervision-watchdog-reset reply: %s", getattr(reply, "xml", reply))
+
+    def supervise(self, interval, guard):
+        """Keep an O-RU supervision session alive, driven by notifications.
+
+        Reset the O-RU watchdog each time a supervision-notification arrives, never on
+        a fixed timer (a timer based reset would mask a real O-RU failure). No initial
+        reset is sent: the O-RU supervises with its default timers and notifies on its
+        own, so the client only reacts.
+        """
+        if self.dry_run:
+            logging.info("Dry run: skipping supervision loop")
+            return
+        supervision_tag = "{urn:o-ran:supervision:1.0}supervision-notification"
+        timeout = interval + guard
+        try:
+            self.netconf_manager.create_subscription()
+            logging.info("Supervision started; waiting for supervision-notifications")
+            while True:
+                notification = self.netconf_manager.take_notification(block=True, timeout=timeout)
+                if notification is None:
+                    logging.warning("No supervision-notification within %ss; O-RU may be unresponsive", timeout)
+                    continue
+                if ET.fromstring(notification.notification_xml).find(".//" + supervision_tag) is None:
+                    logging.debug("Ignoring non-supervision notification")
+                    continue
+                logging.info("supervision-notification received; resetting watchdog")
+                self._reset_supervision_watchdog(interval, guard)
+        except (transport_errors.TransportError, rpc_ops.RPCError) as err:
+            logging.error("Supervision failed: %s", err)
+            sys.exit(1)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OCUDU O-RU controller.")
@@ -272,6 +316,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--carrier_state", choices=["ACTIVE", "INACTIVE"], default="ACTIVE", help="Whether Tx/Rx carriers are active"
     )
+
+    # Supervision watchdog keep-alive
+    parser.add_argument(
+        "--supervise",
+        action="store_true",
+        help="Keep the O-RU supervision session alive by resetting its watchdog on each supervision-notification",
+    )
+    parser.add_argument(
+        "--supervision-interval", type=int, default=60, help="supervision-notification-interval in seconds"
+    )
+    parser.add_argument("--supervision-guard", type=int, default=10, help="guard-timer-overhead in seconds")
 
     # Misc arguments
     parser.add_argument("--dry-run", action="store_true", help="Just print config but don't apply")
@@ -410,6 +465,9 @@ if __name__ == "__main__":
     if args.activate_carriers:
         carrier_activation_config = {"state": args.carrier_state}
         ru_controller.set_oran_uplane_carrier_active(carrier_activation_config)
+
+    if args.supervise:
+        ru_controller.supervise(args.supervision_interval, args.supervision_guard)
 
     if session is not None:
         session.close_session()
