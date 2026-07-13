@@ -9,14 +9,15 @@ This module is a stand-alone application for configuring ORAN radio units over M
 Usage:
     This module can be executed as a standalone script.
 """
+
 import argparse
 import errno
 import logging
 import sys
 import time
-from pathlib import Path
 import xml.dom.minidom
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from xml.parsers.expat import ExpatError
 
 import xmltodict
@@ -385,66 +386,65 @@ if __name__ == "__main__":
     session = None  # pylint: disable=invalid-name,duplicate-code
     if not args.dry_run:
         # Let's go
-        try:
-            if args.callhome:
-                logging.info("Waiting for NETCONF call-home on %s:%d", args.callhome_bind, args.callhome_port)
-                while True:
-                    try:
-                        session = manager.call_home(
-                            host=args.callhome_bind,
-                            port=args.callhome_port,
-                            username=args.username,
-                            password=args.password,
-                            hostkey_verify=False,
-                            look_for_keys=False,
-                            allow_agent=False,
-                        )
-                        break
-                    except TimeoutError:
-                        # manager.call_home() uses a hard-coded 10s accept timeout, while the
-                        # O-RU re-call-home timer defaults to 60s, so a single accept would
-                        # usually time out first. Keep waiting for the O-RU to connect.
-                        logging.debug("call-home accept timed out, still waiting for the O-RU")
-                        continue
-                    except OSError as e:
-                        # manager.call_home() does not set SO_REUSEADDR and leaves the listening
-                        # socket open on failure, so a retry can hit EADDRINUSE until the previous
-                        # socket is released (ncclient issue #578). Wait briefly and retry; any
-                        # other OSError is unexpected and is re-raised.
-                        if e.errno != errno.EADDRINUSE:
-                            raise
-                        logging.debug("call-home port still in use (%s), retrying", e)
-                        time.sleep(1)
-                        continue
-            else:
+        if args.callhome:
+            logging.info("Waiting for NETCONF call-home on %s:%d", args.callhome_bind, args.callhome_port)
+            while True:
                 try:
-                    session = manager.connect(
-                        host=args.host,
-                        port=args.port,
+                    session = manager.call_home(
+                        host=args.callhome_bind,
+                        port=args.callhome_port,
                         username=args.username,
                         password=args.password,
                         hostkey_verify=False,
                         look_for_keys=False,
                         allow_agent=False,
-                    )  # pylint: enable=duplicate-code
-                    logging.info("Connected to %s:%d as %s", args.host, args.port, args.username)
-                except transport_errors.AuthenticationError as e:
-                    logging.error("Authentication failed for user '%s': %s", args.username, e)
-                    sys.exit(1)
-                except transport_errors.SSHUnknownHostError as e:
-                    logging.error(
-                        "Unknown host key for %s — add it to known_hosts or use hostkey_verify=False: %s", args.host, e
                     )
-                    sys.exit(1)
-                except transport_errors.SessionCloseError as e:
-                    logging.error("Session closed unexpectedly while connecting to RU: %s", e)
-                    sys.exit(1)
-                except transport_errors.SSHError as e:
-                    logging.error("SSH error while connecting to %s:%d: %s", args.host, args.port, e)
-                    sys.exit(1)
-                except (ConnectionError, TimeoutError) as e:
-                    logging.error("Couldn't connect to sysrepo on RU: %s", e)
-                    sys.exit(1)
+                    break
+                except TimeoutError:
+                    # manager.call_home() uses a hard-coded 10s accept timeout, while the
+                    # O-RU re-call-home timer defaults to 60s, so a single accept would
+                    # usually time out first. Keep waiting for the O-RU to connect.
+                    logging.debug("call-home accept timed out, still waiting for the O-RU")
+                    continue
+                except OSError as e:
+                    # manager.call_home() does not set SO_REUSEADDR and leaves the listening
+                    # socket open on failure, so a retry can hit EADDRINUSE until the previous
+                    # socket is released (ncclient issue #578). Wait briefly and retry; any
+                    # other OSError is unexpected and is re-raised.
+                    if e.errno != errno.EADDRINUSE:
+                        raise
+                    logging.debug("call-home port still in use (%s), retrying", e)
+                    time.sleep(1)
+                    continue
+        else:
+            try:
+                session = manager.connect(
+                    host=args.host,
+                    port=args.port,
+                    username=args.username,
+                    password=args.password,
+                    hostkey_verify=False,
+                    look_for_keys=False,
+                    allow_agent=False,
+                )  # pylint: enable=duplicate-code
+                logging.info("Connected to %s:%d as %s", args.host, args.port, args.username)
+            except transport_errors.AuthenticationError as e:
+                logging.error("Authentication failed for user '%s': %s", args.username, e)
+                sys.exit(1)
+            except transport_errors.SSHUnknownHostError as e:
+                logging.error(
+                    "Unknown host key for %s — add it to known_hosts or use hostkey_verify=False: %s", args.host, e
+                )
+                sys.exit(1)
+            except transport_errors.SessionCloseError as e:
+                logging.error("Session closed unexpectedly while connecting to RU: %s", e)
+                sys.exit(1)
+            except transport_errors.SSHError as e:
+                logging.error("SSH error while connecting to %s:%d: %s", args.host, args.port, e)
+                sys.exit(1)
+            except (ConnectionError, TimeoutError) as e:
+                logging.error("Couldn't connect to sysrepo on RU: %s", e)
+                sys.exit(1)
 
     ru_controller = RuConfig(session, args.datastore)
 
