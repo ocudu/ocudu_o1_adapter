@@ -26,7 +26,7 @@ from contextlib import suppress
 import websockets
 from flask import Flask, jsonify
 from ncclient import manager
-from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, TLSError
+from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, TLSError, SSHUnknownHostError
 
 from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
@@ -129,18 +129,25 @@ async def try_connect(args, alarm_mgr):
             return m
 
         return await asyncio.to_thread(connect)
-
-    except (
-        SSHError,
-        AuthenticationError,
-        SessionCloseError,
-        TLSError,  # TLS connect / handshake / cert failures (ncclient wraps ssl.SSLError)
-    ) as e:
-        logging.warning(f"NETCONF connection failed: {e}")
-        alarm_mgr.set_alarm(
-            1001,
-            message="NETCONF connection lost",
-        )
+    except AuthenticationError as e:
+        logging.warning(f"NETCONF authentication failed for user '{args.netconf_username}': {e}")
+        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        return None
+    except SSHUnknownHostError as e:
+        logging.warning(f"NETCONF unknown host key for {args.netconf_host}: {e}")
+        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        return None
+    except SessionCloseError as e:
+        logging.warning(f"NETCONF session closed unexpectedly while connecting to {args.netconf_host}: {e}")
+        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        return None
+    except SSHError as e:
+        logging.warning(f"NETCONF SSH error while connecting to {args.netconf_host}:{args.netconf_port}: {e}")
+        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        return None
+    except TLSError as e:
+        logging.warning(f"NETCONF TLS error while connecting to {args.netconf_host}:{args.netconf_tls_port}: {e}")
+        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
         return None
 
 
@@ -550,7 +557,9 @@ if __name__ == "__main__":
         if not cmd_args.ru_netconf_password:
             missing_ru_args.append("--ru_netconf_password")
         if missing_ru_args:
-            parser.error("Missing required RU NETCONF arguments when --ru_forward is set: " + ", ".join(missing_ru_args))
+            parser.error(
+                "Missing required RU NETCONF arguments when --ru_forward is set: " + ", ".join(missing_ru_args)
+            )
 
     logging.basicConfig(
         format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s",
