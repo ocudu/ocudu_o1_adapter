@@ -21,6 +21,9 @@ include:
     file: .gitlab/ci-shared/static.yml
   - project: $[[ inputs.ocudu_path ]]
     ref: $[[ inputs.ocudu_ref ]]
+    file: .gitlab/ci-shared/python.yml    
+  - project: $[[ inputs.ocudu_path ]]
+    ref: $[[ inputs.ocudu_ref ]]
     file: .gitlab/ci-shared/docker.yml
   - project: $[[ inputs.ocudu_path ]]
     ref: $[[ inputs.ocudu_ref ]]
@@ -41,6 +44,15 @@ stages:
 headers:
   stage: ci
   extends: .headers
+
+tox:
+  extends: .tox
+  stage: test
+  rules:
+    - if: $ON_MR
+  variables:
+    PY_DIR: ${CI_PROJECT_DIR}
+  needs: []
 
 o1 integration tests downstream:
   stage: test
