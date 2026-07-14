@@ -12,11 +12,11 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
 
 from state import AppState
-
 
 # 1:1 gNB scalar -> 3GPP KPI rename + rescale (TS 28.554). Aggregated KPIs live in
 # _derived_kpis. Note: spec §6.4.2 spells "VirtualResUtilization" as "VirtualResUtilizaiton";
@@ -93,28 +93,44 @@ def _derived_kpis(data: dict) -> list:
     return out
 
 
+def _flatten_cells(data: dict, out: list) -> None:
+    """Flatten data['cells'][*] scalar fields, cell_metrics, and ue_list into out."""
+    cells = data.get("cells")
+    if not isinstance(cells, list):
+        return
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        cell_id = cell.get("cellId")
+        for name, value in cell.items():
+            if name == "cellId":
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out.append({"name": name, "value": value, "cellId": cell_id})
+        cell_metrics = cell.get("cell_metrics")
+        if isinstance(cell_metrics, dict):
+            _collect_scalars("cells.cell_metrics", cell_metrics, out)
+        ue_list = cell.get("ue_list")
+        if isinstance(ue_list, list):
+            for ue in ue_list:
+                if isinstance(ue, dict):
+                    _collect_scalars("cells.ue_list", ue, out)
+
+
+def _flatten_mac_dl(data: dict, out: list) -> None:
+    """Flatten data.du.du_high.mac.dl[*] scalar fields into out."""
+    mac_dl = (((data.get("du") or {}).get("du_high") or {}).get("mac") or {}).get("dl")
+    if not isinstance(mac_dl, list):
+        return
+    for entry in mac_dl:
+        if isinstance(entry, dict):
+            _collect_scalars("du.du_high.mac.dl", entry, out)
+
+
 def _flatten_metrics(data: dict) -> list:
     """Flatten the gNB WS metric payload into a list of {name, value} entries."""
-    out = []
-    cells = data.get("cells")
-    if isinstance(cells, list):
-        for cell in cells:
-            if not isinstance(cell, dict):
-                continue
-            cell_id = cell.get("cellId")
-            for name, value in cell.items():
-                if name == "cellId":
-                    continue
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    out.append({"name": name, "value": value, "cellId": cell_id})
-            cell_metrics = cell.get("cell_metrics")
-            if isinstance(cell_metrics, dict):
-                _collect_scalars("cells.cell_metrics", cell_metrics, out)
-            ue_list = cell.get("ue_list")
-            if isinstance(ue_list, list):
-                for ue in ue_list:
-                    if isinstance(ue, dict):
-                        _collect_scalars("cells.ue_list", ue, out)
+    out: list[dict[str, Any]] = []
+    _flatten_cells(data, out)
 
     for top_key in ("rlc_metrics", "app_resource_usage", "buffer_pool", "du_low"):
         block = data.get(top_key)
@@ -125,11 +141,7 @@ def _flatten_metrics(data: dict) -> list:
     if isinstance(pdcp, dict):
         _collect_scalars("cu-up.pdcp", pdcp, out)
 
-    mac_dl = (((data.get("du") or {}).get("du_high") or {}).get("mac") or {}).get("dl")
-    if isinstance(mac_dl, list):
-        for entry in mac_dl:
-            if isinstance(entry, dict):
-                _collect_scalars("du.du_high.mac.dl", entry, out)
+    _flatten_mac_dl(data, out)
 
     out.extend(_derived_kpis(data))
     return out

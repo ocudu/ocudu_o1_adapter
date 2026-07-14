@@ -118,7 +118,7 @@ class RuForwarder:
                 local = child.tag.split("}", maxsplit=1)[-1]
                 if ns not in SYNC_ALLOWED_NAMESPACES:
                     skipped += 1
-                    logging.debug(f"Startup selective sync skipped '{local}' due to namespace filter '{ns}'")
+                    logging.debug("Startup selective sync skipped '%s' due to namespace filter '%s'", local, ns)
                     continue
 
                 attempted += 1
@@ -132,23 +132,26 @@ class RuForwarder:
                     )
                     applied += 1
                 except Exception as child_err:  # pylint: disable=broad-exception-caught
-                    logging.warning(f"Startup selective sync failed for '{local}': {child_err}")
+                    logging.warning("Startup selective sync failed for '%s': %s", local, child_err)
 
             if applied:
                 logging.info(
-                    f"Startup selective sync completed: applied {applied}/{attempted} top-level config element(s), "
-                    f"skipped {skipped} filtered namespace element(s)"
+                    "Startup selective sync completed: applied %d/%d top-level config element(s), "
+                    "skipped %d filtered namespace element(s)",
+                    applied,
+                    attempted,
+                    skipped,
                 )
                 return True
             logging.warning(
-                f"Startup selective sync did not apply any config (attempted={attempted}, skipped={skipped})"
+                "Startup selective sync did not apply any config (attempted=%d, skipped=%d)", attempted, skipped
             )
             return False
         except (ValueError, ET.ParseError) as e:
-            logging.warning(f"Startup sync failed while converting RU NETCONF payload: {e}")
+            logging.warning("Startup sync failed while converting RU NETCONF payload: %s", e)
             return False
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logging.warning(f"Startup sync failed while applying RU NETCONF payload: {e}")
+            logging.warning("Startup sync failed while applying RU NETCONF payload: %s", e)
             return False
         finally:
             with suppress(Exception):
@@ -162,7 +165,6 @@ class RuForwarder:
         try:
             # run blocking ncclient call in a background thread
             def connect():
-                # pylint: disable=duplicate-code
                 netconf_manager = manager.connect(
                     host=self.args.ru_netconf_host,
                     port=self.args.ru_netconf_port,
@@ -173,7 +175,6 @@ class RuForwarder:
                     look_for_keys=False,
                     # timeout=self.retry_interval,
                 )
-                # pylint: enable=duplicate-code
                 logging.info("Connected to RU NETCONF server")
                 self.alarm_mgr.clear_alarm(
                     1003,
@@ -188,7 +189,7 @@ class RuForwarder:
             AuthenticationError,
             SessionCloseError,
         ) as e:
-            logging.warning(f"RU NETCONF connection failed: {e}")
+            logging.warning("RU NETCONF connection failed: %s", e)
             self.alarm_mgr.set_alarm(
                 1003,
                 message="RU NETCONF connection lost",
@@ -217,9 +218,9 @@ class RuForwarder:
                         await asyncio.to_thread(ru_config.edit_config, edit_payload, "Forwarded NETCONF config")
                         logging.info("Forwarded NETCONF update to RU")
                     except (ValueError, ET.ParseError) as e:
-                        logging.warning(f"Skipping RU forward update due to payload conversion error: {e}")
+                        logging.warning("Skipping RU forward update due to payload conversion error: %s", e)
                     except Exception as e:  # pylint: disable=broad-exception-caught
-                        logging.warning(f"Failed forwarding NETCONF update to RU: {e}")
+                        logging.warning("Failed forwarding NETCONF update to RU: %s", e)
                         if not ru_session.connected:
                             break
                     finally:
@@ -235,5 +236,5 @@ class RuForwarder:
                 1003,
                 message="RU NETCONF connection lost",
             )
-            logging.debug(f"Retrying RU NETCONF forwarder in {self.retry_interval} seconds...")
+            logging.debug("Retrying RU NETCONF forwarder in %s seconds...", self.retry_interval)
             await asyncio.sleep(self.retry_interval)

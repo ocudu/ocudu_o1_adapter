@@ -6,6 +6,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any, Dict
 
 import ncclient
 import xmltodict
@@ -14,6 +15,7 @@ from jinja2 import Environment, exceptions as jinja2_exceptions, FileSystemLoade
 
 from remote_commands import WsRemoteCommands
 from state import AppState
+from xml_utils import ensure_list
 
 # take_notification() blocks off the event loop and returns the instant ncclient
 # queues a server-pushed <notification>, so config changes are handled event-driven
@@ -39,7 +41,16 @@ class ConfigManager:
     _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio", "PerfMetricJob"]
     _FULL_RESTART_TIMEOUT = 30
 
-    def __init__(self, state: AppState, netconf_manager, datastore, output_filename, template_filename, ru_forward_enabled, profile="gnb"):
+    def __init__(
+        self,
+        state: AppState,
+        netconf_manager,
+        datastore,
+        output_filename,
+        template_filename,
+        ru_forward_enabled,
+        profile="gnb",
+    ):
         # execute the base constructor
         self.netconf_manager = netconf_manager
         self.datastore = datastore
@@ -194,7 +205,7 @@ class ConfigManager:
 
         return nc_du_cell_config
 
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     def write_full_config(self, raw_config, raw_xml=None):
         """
         Writes the full configuration to a file based on the provided raw configuration.
@@ -242,8 +253,6 @@ class ConfigManager:
                 }
             except KeyError as e:
                 logging.warning(f"Couldn't extract DU F1-C config: {e}")
-            except socket.gaierror as e:
-                logging.warning(f"Couldn't resolve DU F1-C remoteAddress: {e}")
             try:
                 ep_f1u = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1U"]["attributes"]
                 f1u_config = {"socket": [{"bind_addr": ep_f1u["localAddress"]["ipAddress"]}]}
@@ -261,11 +270,11 @@ class ConfigManager:
         # the DU; log lives on any function (first-wins); pcap entries are merged across
         # all functions; metrics_extensions is now per-function and gets merged
         testmode_config = {"enabled": False}
-        log_config = {}
+        log_config: Dict[str, Any] = {}
         hal_config = {}
-        metrics_config = {}
+        metrics_config: Dict[str, Any] = {}
         remote_control_config = {}
-        pcap_config = {}
+        pcap_config: Dict[str, Any] = {}
         ru_dummy_config = {}
         ru_sdr_config = {}
 
@@ -368,8 +377,7 @@ class ConfigManager:
     @staticmethod
     def _active_stream_ids(jobs: dict) -> set:
         return {
-            jid for jid, job in jobs.items()
-            if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
+            jid for jid, job in jobs.items() if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
         }
 
     @staticmethod
@@ -386,7 +394,7 @@ class ConfigManager:
                 continue
             plmn_attrs = (nf.get("attributes", {}) or {}).get("pLMNId", {}) or {}
             plmn_id = (plmn_attrs.get("mcc") or "") + (plmn_attrs.get("mnc") or "")
-            for entry in ConfigManager._ensure_list(nf.get("PerfMetricJob")):
+            for entry in ensure_list(nf.get("PerfMetricJob")):
                 job_id = entry.get("id")
                 if not job_id:
                     continue
@@ -397,7 +405,7 @@ class ConfigManager:
                     granularity = 1
                 jobs[job_id] = {
                     "administrativeState": attrs.get("administrativeState", "LOCKED"),
-                    "performanceMetrics": ConfigManager._ensure_list(attrs.get("performanceMetrics")),
+                    "performanceMetrics": ensure_list(attrs.get("performanceMetrics")),
                     "granularityPeriod": granularity,
                     "streamTarget": attrs.get("streamTarget"),
                     "nf_key": nf_key,
@@ -406,6 +414,7 @@ class ConfigManager:
                 }
         return jobs
 
+    # pylint: disable=too-many-locals
     def _extract_cucp_config(self, raw_config, du_cells=None):
         cucp_config = {}
         try:
@@ -432,9 +441,7 @@ class ConfigManager:
                     nc_rrm_members = [nc_rrm_members]
                 tai_slice_support_list = []
                 for member in nc_rrm_members:
-                    tai_slice_support_list.append(
-                        {"sst": int(member["sst"]), "sd": self._parse_sd(member["sd"])}
-                    )
+                    tai_slice_support_list.append({"sst": int(member["sst"]), "sd": self._parse_sd(member["sd"])})
             except (KeyError, ValueError) as e:
                 logging.warning(f"Couldn't extract tai_slice_support_list from GNBCUCPFunction RRMPolicyRatio: {e}")
 
@@ -468,9 +475,7 @@ class ConfigManager:
 
             for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
                 try:
-                    cucp_config[key] = {
-                        "bind_addrs": nc_cucp_config[ep]["attributes"]["localAddress"]["ipAddress"]
-                    }
+                    cucp_config[key] = {"bind_addrs": nc_cucp_config[ep]["attributes"]["localAddress"]["ipAddress"]}
                 except KeyError:
                     pass
         except KeyError as e:
@@ -485,6 +490,7 @@ class ConfigManager:
 
         return cucp_config
 
+    # pylint: disable=too-many-locals
     def _extract_cucp_mobility_config(self, raw_config):
         """Extract cu_cp.mobility from the NETCONF tree.
 
@@ -504,7 +510,7 @@ class ConfigManager:
         gnb_id_length = int(cucp_attrs["gNBIdLength"])
         cell_id_shift = 36 - gnb_id_length
 
-        nrcellcu_list = self._ensure_list(nc_cucp.get("NRCellCU"))
+        nrcellcu_list = ensure_list(nc_cucp.get("NRCellCU"))
 
         nci_by_id = {}
         for nrcellcu in nrcellcu_list:
@@ -513,7 +519,7 @@ class ConfigManager:
 
         report_configs = []
         if mob_ext:
-            for rc in self._ensure_list(mob_ext.get("report_configs")):
+            for rc in ensure_list(mob_ext.get("report_configs")):
                 entry = {}
                 for key in (
                     "report_cfg_id",
@@ -553,9 +559,9 @@ class ConfigManager:
                 continue
 
             cellcu_mob = nrcellcu.get("attributes", {}).get("ocudu_nrcellcu_mobility_extensions") or {}
-            relations = self._ensure_list(nrcellcu.get("NRCellRelation"))
+            relations = ensure_list(nrcellcu.get("NRCellRelation"))
 
-            cell_entry = {"nr_cell_id": f"0x{nci:x}"}
+            cell_entry: Dict[str, Any] = {"nr_cell_id": f"0x{nci:x}"}
             if "periodic_report_cfg_id" in cellcu_mob:
                 cell_entry["periodic_report_cfg_id"] = int(cellcu_mob["periodic_report_cfg_id"])
 
@@ -572,12 +578,10 @@ class ConfigManager:
                         break
                 if target_nci is None:
                     continue
-                ncell = {"nr_cell_id": f"0x{target_nci:x}"}
-                refs = rel_attrs.get("ocudu_nrcellrelation_mobility_extensions", {}).get(
-                    "report_config_refs"
-                )
+                ncell: Dict[str, Any] = {"nr_cell_id": f"0x{target_nci:x}"}
+                refs = rel_attrs.get("ocudu_nrcellrelation_mobility_extensions", {}).get("report_config_refs")
                 if refs is not None:
-                    ncell["report_configs"] = [int(r) for r in self._ensure_list(refs)]
+                    ncell["report_configs"] = [int(r) for r in ensure_list(refs)]
                 ncells.append(ncell)
             if ncells:
                 cell_entry["ncells"] = ncells
@@ -585,11 +589,9 @@ class ConfigManager:
             if "periodic_report_cfg_id" in cell_entry or "ncells" in cell_entry:
                 mobility_cells.append(cell_entry)
 
-        mobility = {}
+        mobility: Dict[str, Any] = {}
         if mob_ext and "trigger_handover_from_measurements" in mob_ext:
-            mobility["trigger_handover_from_measurements"] = str(
-                mob_ext["trigger_handover_from_measurements"]
-            ).lower()
+            mobility["trigger_handover_from_measurements"] = str(mob_ext["trigger_handover_from_measurements"]).lower()
         if mob_ext and "trigger_cho_on_ue_setup" in mob_ext:
             mobility["trigger_cho_on_ue_setup"] = str(mob_ext["trigger_cho_on_ue_setup"]).lower()
         if mob_ext and "cho_timeout_ms" in mob_ext:
@@ -631,17 +633,8 @@ class ConfigManager:
                 return value
         return value
 
-    @staticmethod
-    def _ensure_list(value):
-        """Normalise xmltodict output: missing -> [], single -> [x], list -> list."""
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
-        return [value]
-
     def _extract_cuup_config(self, raw_config):
-        cuup_config = {}
+        cuup_config: Dict[str, Any] = {}
         try:
             nc_cuup = raw_config["data"]["ManagedElement"]["GNBCUUPFunction"]
         except KeyError:
@@ -691,7 +684,9 @@ class ConfigManager:
     def _extract_rrm_policy_ratio_config(self, raw_config):
         cfg = {}
         try:
-            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"]["attributes"]
+            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"][
+                "attributes"
+            ]
 
             # Build config subtree
             cfg = {
@@ -717,7 +712,9 @@ class ConfigManager:
     def _extract_cell_config(self, raw_config, du_cells=None):
         cell_cfg = {}
         try:
-            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"]["attributes"]
+            rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"][
+                "attributes"
+            ]
 
             plmn = rrm_policy_config["rRMPolicyMemberList"]["mcc"] + rrm_policy_config["rRMPolicyMemberList"]["mnc"]
 
@@ -753,6 +750,7 @@ class ConfigManager:
         # Iterate over DU cell and build extract OFH and DU config values
         ofh_cell_config = []
         du_cell_config = []
+        # pylint: disable=too-many-nested-blocks
         for cell in self.get_du_cell_config(raw_config):
             try:
                 nc_cell_extension = cell["attributes"]["ocudu_nrcelldu_extensions"]
@@ -883,7 +881,8 @@ class ConfigManager:
 
             try:
                 mcg_ext = nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"]
-                # Emit each mac_cell_group sub-container as a YAML flow mapping so the template's 2-level loop renders it.
+                # Emit each mac_cell_group sub-container as a YAML flow mapping
+                # so the template's 2-level loop renders it.
                 mcg_fields = {}
                 bsr_cfg = mcg_ext.get("bsr_cfg")
                 if bsr_cfg:
@@ -976,9 +975,7 @@ class ConfigManager:
                 # blocked. A queued notification returns immediately; the tick timeout
                 # only bounds how fast we notice stop_event / a dropped connection
                 # between changes.
-                notif = await asyncio.to_thread(
-                    self.netconf_manager.take_notification, True, NOTIFICATION_TICK
-                )
+                notif = await asyncio.to_thread(self.netconf_manager.take_notification, True, NOTIFICATION_TICK)
                 if notif is None:
                     continue
 

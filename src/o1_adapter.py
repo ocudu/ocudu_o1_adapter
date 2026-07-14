@@ -26,7 +26,7 @@ from contextlib import suppress
 import websockets
 from flask import Flask, jsonify
 from ncclient import manager
-from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, TLSError, SSHUnknownHostError
+from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError, TLSError
 
 from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
@@ -94,9 +94,8 @@ async def try_connect(args, alarm_mgr):
     Returns manager instance if successful, None otherwise
     """
     try:
-        # run blocking ncclient call in a background thread
+
         def connect():
-            # pylint: disable=duplicate-code
             if args.netconf_tls:
                 cert_dir = args.netconf_tls_cert_dir
                 m = manager.connect_tls(
@@ -120,7 +119,6 @@ async def try_connect(args, alarm_mgr):
                     look_for_keys=False,
                     timeout=RETRY_INTERVAL,
                 )
-            # pylint: enable=duplicate-code
             logging.info("Connected to NETCONF server")
             alarm_mgr.clear_alarm(
                 1001,
@@ -195,6 +193,60 @@ async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
         await asyncio.sleep(RETRY_INTERVAL)
 
 
+async def _run_ws_session(ws, state: AppState, pm_metrics: PmMetrics):
+    """Drive one WS connection's sender/receiver/keepalive tasks until one of them exits."""
+    # clear pending messages
+    logging.debug(f"Clearing {state.ws_send_queue.qsize()} pending WS messages")
+    while not state.ws_send_queue.empty():
+        state.ws_send_queue.get_nowait()
+        state.ws_send_queue.task_done()
+
+    # Subscribe to metrics
+    state.ws_send_queue.put_nowait(json.dumps({"cmd": "metrics_subscribe"}))
+
+    # Sender task: push messages from queue to WS
+    async def sender():
+        while True:
+            msg = await state.ws_send_queue.get()
+            try:
+                await ws.send(msg)
+            except websockets.exceptions.ConnectionClosed:
+                break
+            logging.debug(f"TXed WS: {msg}")
+
+    # Receiver task: print WS incoming messages
+    async def receiver():
+        try:
+            async for msg in ws:
+                await pm_metrics.handle_ws_message(msg)
+        except websockets.exceptions.ConnectionClosed:
+            return
+
+    async def keepalive():
+        while True:
+            try:
+                pong_waiter = await ws.ping()
+                await asyncio.wait_for(pong_waiter, timeout=5)
+            except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                break
+            await asyncio.sleep(5)
+
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver()), asyncio.create_task(keepalive())]
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+    for task in pending:
+        task.cancel()
+
+    for task in pending:
+        with suppress(asyncio.CancelledError):
+            await task
+
+    for task in done:
+        exc = task.exception()
+        if exc:
+            raise exc
+
+
 async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
     """WebSocket handler main loop."""
     while True:
@@ -210,63 +262,7 @@ async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
                     1002,
                     message="WS connection restored",
                 )
-
-                # clear pending messages
-                logging.debug(f"Clearing {state.ws_send_queue.qsize()} pending WS messages")
-                while not state.ws_send_queue.empty():
-                    state.ws_send_queue.get_nowait()
-                    state.ws_send_queue.task_done()
-
-                # Subscribe to metrics
-                state.ws_send_queue.put_nowait(json.dumps({"cmd": "metrics_subscribe"}))
-
-                # Sender task: push messages from queue to WS
-                async def sender():
-                    while True:
-                        msg = await state.ws_send_queue.get()
-                        try:
-                            await ws.send(msg)
-                        except websockets.exceptions.ConnectionClosed:
-                            break
-                        logging.debug(f"TXed WS: {msg}")
-
-                # Receiver task: print WS incoming messages
-                async def receiver():
-                    try:
-                        async for msg in ws:
-                            await pm_metrics.handle_ws_message(msg)
-                    except websockets.exceptions.ConnectionClosed:
-                        return
-
-                async def keepalive():
-                    while True:
-                        try:
-                            pong_waiter = await ws.ping()
-                            await asyncio.wait_for(pong_waiter, timeout=5)
-                        except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
-                            break
-                        await asyncio.sleep(5)
-
-                sender_task = asyncio.create_task(sender())
-                receiver_task = asyncio.create_task(receiver())
-                keepalive_task = asyncio.create_task(keepalive())
-
-                done, pending = await asyncio.wait(
-                    [sender_task, receiver_task, keepalive_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                for task in pending:
-                    task.cancel()
-
-                for task in pending:
-                    with suppress(asyncio.CancelledError):
-                        await task
-
-                for task in done:
-                    exc = task.exception()
-                    if exc:
-                        raise exc
+                await _run_ws_session(ws, state, pm_metrics)
 
         except (
             OSError,

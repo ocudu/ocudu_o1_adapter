@@ -10,13 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-
-def _ensure_list(value: Any) -> List[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
+from xml_utils import ensure_list as _ensure_list
 
 
 def _to_int(value: Any) -> Optional[int]:
