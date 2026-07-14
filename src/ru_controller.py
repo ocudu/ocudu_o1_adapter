@@ -29,6 +29,24 @@ from ncclient.xml_ import to_ele
 from ofh_config_builder import build_ofh_config, print_ofh_config
 
 
+def _extract_bad_element(rpc_error_info):
+    """Extract the bad-element name from an RPCError's info field, or return None."""
+    if not rpc_error_info:
+        return None
+    # ncclient parses error-info with xmltodict, so info is usually a dict
+    if isinstance(rpc_error_info, dict):
+        return rpc_error_info.get("bad-element")
+    # Fall back to XML parsing when info arrives as a raw string
+    if isinstance(rpc_error_info, str):
+        try:
+            root = ET.fromstring(rpc_error_info)
+            el = root.find(".//{*}bad-element") or root.find(".//bad-element")
+            return el.text if el is not None else None
+        except ET.ParseError:
+            return None
+    return None
+
+
 class RuConfig:  # pylint: disable=too-many-public-methods
     """
     A class for configuring ORAN radio units over NETCONF/Mplane interface.
@@ -63,7 +81,24 @@ class RuConfig:  # pylint: disable=too-many-public-methods
                 self.netconf_manager.edit_config(
                     config=xml_request, format="xml", target=self.datastore, default_operation=self.operation
                 )
-            except (ConnectionError, TimeoutError) as e:
+            except rpc_ops.RPCError as e:
+                details = []
+                if e.path:
+                    details.append(f"path: {e.path}")
+                bad_element = _extract_bad_element(e.info)
+                if bad_element:
+                    details.append(f"bad-element: {bad_element}")
+                if details:
+                    logging.error(
+                        "NETCONF RPC error editing %s (%s) — %s",
+                        description,
+                        e.message or e.tag,
+                        ", ".join(details),
+                    )
+                else:
+                    logging.error("NETCONF RPC error editing %s: %s", description, e)
+                sys.exit(1)
+            except (ConnectionError, TimeoutError, transport_errors.SessionCloseError) as e:
                 logging.error("Error occurred during operation: %s", e)
                 sys.exit(1)
 
@@ -382,18 +417,34 @@ if __name__ == "__main__":
                         time.sleep(1)
                         continue
             else:
-                session = manager.connect(
-                    host=args.host,
-                    port=args.port,
-                    username=args.username,
-                    password=args.password,
-                    hostkey_verify=False,
-                    look_for_keys=False,
-                    allow_agent=False,
-                )  # pylint: enable=duplicate-code
-        except (ConnectionError, TimeoutError) as e:
-            logging.error("Couldn't connect to sysrepo on RU: %s", e)
-            sys.exit(1)
+                try:
+                    session = manager.connect(
+                        host=args.host,
+                        port=args.port,
+                        username=args.username,
+                        password=args.password,
+                        hostkey_verify=False,
+                        look_for_keys=False,
+                        allow_agent=False,
+                    )  # pylint: enable=duplicate-code
+                    logging.info("Connected to %s:%d as %s", args.host, args.port, args.username)
+                except transport_errors.AuthenticationError as e:
+                    logging.error("Authentication failed for user '%s': %s", args.username, e)
+                    sys.exit(1)
+                except transport_errors.SSHUnknownHostError as e:
+                    logging.error(
+                        "Unknown host key for %s — add it to known_hosts or use hostkey_verify=False: %s", args.host, e
+                    )
+                    sys.exit(1)
+                except transport_errors.SessionCloseError as e:
+                    logging.error("Session closed unexpectedly while connecting to RU: %s", e)
+                    sys.exit(1)
+                except transport_errors.SSHError as e:
+                    logging.error("SSH error while connecting to %s:%d: %s", args.host, args.port, e)
+                    sys.exit(1)
+                except (ConnectionError, TimeoutError) as e:
+                    logging.error("Couldn't connect to sysrepo on RU: %s", e)
+                    sys.exit(1)
 
     ru_controller = RuConfig(session, args.datastore)
 
