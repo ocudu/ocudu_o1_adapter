@@ -171,8 +171,43 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         """Set ORAN U-plane carrier activation configuration."""
         self._set_config_from_template("oran_uplane_carrier_active.xml", "ORAN Uplane carrier active", active_config)
 
+    def _is_configurable_tdd_supported(self):
+        """Return True if the O-RU advertises CONFIGURABLE-TDD-PATTERN-SUPPORTED.
+
+        Feature support is read from ietf-yang-library (RFC 7895/8525), the
+        standard way a NETCONF server reports the YANG modules and per-module
+        features it implements. The feature is scoped to the module that
+        declares it, o-ran-module-cap. o-ran-uplane-conf references it via
+        if-feature mcap:CONFIGURABLE-TDD-PATTERN-SUPPORTED. modules-state is
+        state data, so it is retrieved with <get>, not <get-config>.
+        """
+        if self.dry_run:
+            return True
+        module_name = "o-ran-module-cap"
+        feature = "CONFIGURABLE-TDD-PATTERN-SUPPORTED"
+        yang_library_filter = '<modules-state xmlns="urn:ietf:params:xml:ns:yang:ietf-yang-library"/>'
+        try:
+            result = self.netconf_manager.get(filter=("subtree", yang_library_filter))
+        except (transport_errors.TransportError, rpc_ops.RPCError) as err:  # pragma: no cover - network errors
+            logging.error("Failed to read ietf-yang-library modules-state: %s", err)
+            return False
+        namespaces = {"yanglib": "urn:ietf:params:xml:ns:yang:ietf-yang-library"}
+        try:
+            root = ET.fromstring(getattr(result, "xml", str(result)))
+        except ET.ParseError as err:  # pragma: no cover - parsing failure
+            logging.error("Unable to parse ietf-yang-library payload: %s", err)
+            return False
+        for module in root.findall(".//yanglib:module", namespaces):
+            if module.findtext("yanglib:name", default="", namespaces=namespaces) != module_name:
+                continue
+            return any((feat.text or "").strip() == feature for feat in module.findall("yanglib:feature", namespaces))
+        return False
+
     def set_oran_uplane_tdd_7d1s2u_slot_6_4_4(self):
         """Set ORAN U-plane TDD to 7d1s2u."""
+        if not self._is_configurable_tdd_supported():
+            logging.info("O-RU does not advertise CONFIGURABLE-TDD-PATTERN-SUPPORTED; skipping TDD u-plane config")
+            return
         self._set_config_from_template("oran_uplane_tdd_7d1s2u_slot_6_4_4.xml", "ORAN Uplane configure TDD to 7d1s2u")
 
     def was_operation_successful(self, result):
