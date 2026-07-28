@@ -641,6 +641,14 @@ class ConfigManager:
             return cuup_config
 
         try:
+            # pLMNInfoList is keyed by mcc/mnc/sd/sst, so a multi-slice PLMN repeats once per
+            # slice; the CU-UP wants the distinct PLMN IDs (fromkeys dedupes, keeping order).
+            plmn_infos = ensure_list(nc_cuup["attributes"]["pLMNInfoList"])
+            cuup_config["plmn_list"] = list(dict.fromkeys(info["mcc"] + info["mnc"] for info in plmn_infos))
+        except KeyError as e:
+            logging.warning(f"Couldn't extract CU-UP PLMN list: {e}")
+
+        try:
             attrs = nc_cuup["EP_E1"]["attributes"]
             cuup_config["e1ap"] = {
                 "gateways": [
