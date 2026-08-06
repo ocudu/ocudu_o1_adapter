@@ -23,6 +23,7 @@ from netconf_to_yaml import (
     extract_cells_config,
     extract_cucp_config,
     extract_cuup_config,
+    extract_ntn_satellites,
     extract_perf_metric_jobs,
     extract_rrm_policy_ratio_config,
     extract_ssb_runtime_config,
@@ -195,6 +196,9 @@ class ConfigManager:
         cell_config = extract_cell_config(raw_config, du_cell_config)
         cucp_config = extract_cucp_config(raw_config, du_cell_config)
         cuup_config = extract_cuup_config(raw_config)
+        # NTNFunction is a ManagedElement-level IOC, so the satellites it defines are shared by every
+        # cell and render as the top-level ntn block rather than per-cell.
+        ntn_satellites = extract_ntn_satellites(raw_config)
 
         # DU F1 addresses (standalone 'du' app only; gnb/cu wire F1 in-process). The DU is the
         # F1-C client: EP_F1C remoteAddress -> f1ap.addrs, localAddress -> f1ap.bind_addrs. The DU's
@@ -305,6 +309,7 @@ class ConfigManager:
                 remote_control_config=remote_control_config,
                 pcap_config=pcap_config,
                 cell_config=cell_config,
+                ntn_satellites=ntn_satellites,
                 ru_dummy_config=ru_dummy_config,
                 ru_sdr_config=ru_sdr_config,
                 f1ap_config=f1ap_config,

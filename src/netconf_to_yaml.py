@@ -14,7 +14,7 @@ rendering, RU forwarding) lives in config_manager.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from xml_utils import ensure_list
 
@@ -31,9 +31,14 @@ def parse_sd(sd):
     return int(sd.replace(":", ""), 16)
 
 
-def _t1_thres_to_unix_ms(value):
-    """Normalise a t1_thres value to Unix milliseconds as int."""
-    # The YANG type accepts either Unix ms or an RFC 3339 timestamp; the gNB only accepts Unix ms.
+def _timestamp_to_unix_ms(value):
+    """Normalise a YANG timestamp leaf to Unix milliseconds as int.
+
+    Used for every union(date-and-time, uint64) timestamp we forward: mobility t1_thres and the
+    NTN epochTime / t_service. The gNB's own ISO 8601 parser accepts no timezone designator and
+    assumes UTC, so an RFC 3339 value with a 'Z' or a numeric offset cannot be passed through
+    verbatim; Unix ms is the one encoding both sides read unambiguously.
+    """
     text = str(value).strip()
     if text.lstrip("-").isdigit():
         return int(text)
@@ -108,6 +113,99 @@ def extract_top_level_config(raw_config):
         pass
 
     return header
+
+
+# 3GPP EphemerisInfos leaf -> the gNB's ephemeris key, for each arm of the
+# positionVelocity-or-orbital choice. Both arms are all-or-nothing: several of the 3GPP leaves carry
+# a default of 0, so a partially-configured arm would silently render as a valid-looking but wrong
+# state vector. We only emit an arm when every leaf of it came back from the server.
+_ECEF_LEAVES = {
+    "positionX": "pos_x",
+    "positionY": "pos_y",
+    "positionZ": "pos_z",
+    "velocityVX": "vel_x",
+    "velocityVY": "vel_y",
+    "velocityVZ": "vel_z",
+}
+
+_ORBITAL_LEAVES = {
+    "semiMajorAxis": "semi_major_axis",
+    "eccentricity": "eccentricity",
+    "periapsis": "periapsis",
+    "longitude": "longitude",
+    "inclination": "inclination",
+    "meanAnomaly": "mean_anomaly",
+}
+
+
+def _flow_mapping(fields):
+    """Render a dict as a YAML flow mapping so the template's 2-level loop can emit it."""
+    return "{" + ", ".join(f"{key}: {value}" for key, value in fields.items()) + "}"
+
+
+def _ephemeris_arm(entry, leaves):
+    """Project one arm of the EphemerisInfos choice, or None when it is absent/incomplete."""
+    # Each arm is a max-elements-1 list keyed by idx, so unwrap the single entry and drop the key.
+    arms = ensure_list(entry)
+    if not arms or not all(leaf in arms[0] for leaf in leaves):
+        return None
+    return {key: arms[0][leaf] for leaf, key in leaves.items()}
+
+
+def extract_ntn_satellites(raw_config):
+    """Build the top-level ntn.satellites list from ManagedElement/NTNFunction.
+
+    One 3GPP EphemerisInfoSet/EphemerisInfos entry becomes one gNB satellite object, which cells
+    reference by satellite_idx. The standard leaves carry the ephemeris; propagator_type,
+    gateway_location and ta_info come from the OCUDU augment on the same list entry.
+    """
+    satellites: List[Dict[str, Any]] = []
+    try:
+        ntn_functions = ensure_list(raw_config["data"]["ManagedElement"]["NTNFunction"])
+    except KeyError:
+        return satellites
+
+    for ntn_function in ntn_functions:
+        for info_set in ensure_list(ntn_function.get("EphemerisInfoSet")):
+            for entry in ensure_list(info_set.get("attributes", {}).get("EphemerisInfos")):
+                satellite: Dict[str, Any] = {}
+
+                # satelliteId is a zero-padded 5-digit string; the gNB indexes satellites by integer.
+                if "satelliteId" in entry:
+                    try:
+                        satellite["satellite_idx"] = int(entry["satelliteId"])
+                    except ValueError as e:
+                        logging.warning(f"Skipping NTN satellite with unparsable satelliteId: {e}")
+                        continue
+                if "epochTime" in entry:
+                    satellite["epoch_timestamp"] = _timestamp_to_unix_ms(entry["epochTime"])
+
+                ecef = _ephemeris_arm(entry.get("positionVelocity"), _ECEF_LEAVES)
+                if ecef:
+                    satellite["ephemeris_info_ecef"] = _flow_mapping(ecef)
+                orbital = _ephemeris_arm(entry.get("orbital"), _ORBITAL_LEAVES)
+                if orbital:
+                    satellite["ephemeris_orbital"] = _flow_mapping(orbital)
+                if not ecef and not orbital:
+                    # A satellite the gNB cannot propagate; emitting it would only produce a config
+                    # the gNB rejects, so drop it loudly instead of rendering a broken entry.
+                    logging.warning(
+                        f"Skipping NTN satellite {entry.get('satelliteId')}: "
+                        "neither positionVelocity nor orbital is fully configured"
+                    )
+                    continue
+
+                # The augment's leaves keep their names: propagator_type is a scalar, while
+                # gateway_location / ta_info are sub-containers that render as flow mappings.
+                for key, value in (entry.get("ocudu_ntn_satellite_extensions") or {}).items():
+                    if key.startswith("@"):  # skip xmltodict namespace attrs (@xmlns)
+                        continue
+                    satellite[key] = _flow_mapping(value) if isinstance(value, dict) else value
+
+                if satellite:
+                    satellites.append(satellite)
+
+    return satellites
 
 
 def get_du_cell_config(raw_config):
@@ -249,15 +347,12 @@ def extract_cells_config(raw_config):
             logging.warning(f"Couldn't extract OCUDU SRS config extensions: {e}")
 
         try:
-            pdcch_ext = nc_cell_extension["ocudu_nrcelldu_pdcch_extensions"]
-            # Emit each pdcch sub-container as a YAML flow mapping so the template's 2-level loop renders it.
+            # Emit each pdcch sub-container (common, dedicated) as a YAML flow mapping so the
+            # template's 2-level loop renders it.
             pdcch_fields = {}
-            common = pdcch_ext.get("common")
-            if common:
-                pdcch_fields["common"] = "{" + ", ".join(f"{k}: {v}" for k, v in common.items()) + "}"
-            dedicated = pdcch_ext.get("dedicated")
-            if dedicated:
-                pdcch_fields["dedicated"] = "{" + ", ".join(f"{k}: {v}" for k, v in dedicated.items()) + "}"
+            for key, value in nc_cell_extension["ocudu_nrcelldu_pdcch_extensions"].items():
+                if value:
+                    pdcch_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
             new_du_cell["pdcch"] = pdcch_fields
         except (KeyError, TypeError) as e:
             logging.warning(f"Couldn't extract OCUDU PDCCH config extensions: {e}")
@@ -279,19 +374,12 @@ def extract_cells_config(raw_config):
             logging.warning(f"Couldn't extract OCUDU DRX config extensions: {e}")
 
         try:
-            mcg_ext = nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"]
-            # Emit each mac_cell_group sub-container as a YAML flow mapping
-            # so the template's 2-level loop renders it.
+            # Emit each mac_cell_group sub-container (bsr_cfg, phr_cfg, sr_cfg) as a YAML flow
+            # mapping so the template's 2-level loop renders it.
             mcg_fields = {}
-            bsr_cfg = mcg_ext.get("bsr_cfg")
-            if bsr_cfg:
-                mcg_fields["bsr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in bsr_cfg.items()) + "}"
-            phr_cfg = mcg_ext.get("phr_cfg")
-            if phr_cfg:
-                mcg_fields["phr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in phr_cfg.items()) + "}"
-            sr_cfg = mcg_ext.get("sr_cfg")
-            if sr_cfg:
-                mcg_fields["sr_cfg"] = "{" + ", ".join(f"{k}: {v}" for k, v in sr_cfg.items()) + "}"
+            for key, value in nc_cell_extension["ocudu_nrcelldu_mac_cell_group_extensions"].items():
+                if value:
+                    mcg_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
             new_du_cell["mac_cell_group"] = mcg_fields
         except (KeyError, TypeError) as e:
             logging.warning(f"Couldn't extract OCUDU MAC cell group config extensions: {e}")
@@ -302,7 +390,7 @@ def extract_cells_config(raw_config):
             for key, value in sib_ext.items():
                 if key in ("etws", "cmas"):
                     # Nested sub-container -> YAML flow mapping so the template's 2-level loop renders it.
-                    sib_fields[key] = "{" + ", ".join(f"{k}: {v}" for k, v in value.items()) + "}"
+                    sib_fields[key] = _flow_mapping(value)
                 elif key == "si_sched_info":
                     # List of SI-message entries -> flow sequence of flow mappings. Drop the ordering key
                     # and render the sib_mapping leaf-list as an inline integer list.
@@ -314,13 +402,29 @@ def extract_cells_config(raw_config):
                         if mapping is not None:
                             mapping = mapping if isinstance(mapping, list) else [mapping]
                             fields["sib_mapping"] = "[" + ", ".join(str(int(m)) for m in mapping) + "]"
-                        rendered.append("{" + ", ".join(f"{k}: {v}" for k, v in fields.items()) + "}")
+                        rendered.append(_flow_mapping(fields))
                     sib_fields[key] = "[" + ", ".join(rendered) + "]"
                 else:
                     sib_fields[key] = value
             new_du_cell["sib"] = sib_fields
         except (KeyError, TypeError) as e:
             logging.warning(f"Couldn't extract OCUDU SIB config extensions: {e}")
+
+        try:
+            ntn_ext = nc_cell_extension["ocudu_nrcelldu_ntn_extensions"]
+            ntn_fields = {}
+            for key, value in ntn_ext.items():
+                if key.startswith("@"):  # skip xmltodict namespace attrs (@xmlns)
+                    continue
+                if key == "t_service":
+                    ntn_fields[key] = _timestamp_to_unix_ms(value)
+                else:
+                    # Sub-containers (epoch_time, reference_location, polarization, feeder_link)
+                    # -> YAML flow mapping so the template's 2-level loop renders them.
+                    ntn_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
+            new_du_cell["ntn"] = ntn_fields
+        except KeyError as e:
+            logging.debug(f"No OCUDU NTN config extensions for this cell: {e}")
 
         try:
             for key, value in nc_cell_extension["ocudu_nrcelldu_base_extensions"].items():
@@ -583,7 +687,7 @@ def extract_cucp_mobility_config(raw_config):
                 if key in rc:
                     value = rc[key]
                     if key == "t1_thres":
-                        value = _t1_thres_to_unix_ms(value)
+                        value = _timestamp_to_unix_ms(value)
                     else:
                         value = _coerce_xml_value(value)
                     entry[key] = value
