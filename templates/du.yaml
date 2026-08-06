@@ -55,6 +55,16 @@ cells:
   {% endfor %}
 {% endfor -%}
 
+{% if ntn_satellites %}
+ntn:
+  satellites:
+  {% for dict_item in ntn_satellites -%}
+  -
+    {% for key, value in dict_item.items() -%}
+    {{ key }}: {{ value }}
+    {% endfor %}
+  {% endfor %}
+{% endif %}
 cell_cfg:
   {% for key, value in cell_config.items() -%}
   {% if value is number or value is string -%}
