@@ -140,7 +140,11 @@ def extract_cells_config(raw_config):
         try:
             tdd_fields = {}
             for key, value in nc_cell_extension["ocudu_nrcelldu_tdd_extensions"].items():
-                tdd_fields[key] = value
+                if key == "pattern2":
+                    # Optional nested pattern -> emit as a YAML flow mapping for the 2-level template.
+                    tdd_fields["pattern2"] = "{" + ", ".join(f"{k}: {v}" for k, v in value.items()) + "}"
+                else:
+                    tdd_fields[key] = value
             new_du_cell["tdd_ul_dl_cfg"] = tdd_fields
         except KeyError as e:
             logging.warning(f"Couldn't extract OCUDU TDD config extensions: {e}")
