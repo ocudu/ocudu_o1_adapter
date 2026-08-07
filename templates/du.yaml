@@ -81,6 +81,12 @@ cell_cfg:
 expert_phy:{% for key, value in expert_phy_config.items() %}
   {{ key }}: {{ value }}{% endfor %}
 {% endif %}
+{% if expert_execution_config.get("main_pool") %}
+expert_execution:
+  threads:
+    main_pool:{% for key, value in expert_execution_config.main_pool.items() %}
+      {{ key }}: {{ value }}{% endfor %}
+{% endif %}
 {% if testmode_config["enabled"] == "true" -%}
 test_mode:
   test_ue:{% for key, value in testmode_config.items() if "enabled" not in key %}
