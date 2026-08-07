@@ -229,6 +229,7 @@ class ConfigManager:
         hal_config = {}
         metrics_config: Dict[str, Any] = {}
         expert_phy_config = {}
+        expert_execution_config = {}
         remote_control_config = {}
         pcap_config: Dict[str, Any] = {}
         ru_dummy_config = {}
@@ -254,6 +255,9 @@ class ConfigManager:
             expert_phy = ext.get("ocudu_expert_phy_extensions")
             if expert_phy is not None:
                 expert_phy_config = expert_phy
+            expert_execution = ext.get("ocudu_expert_execution_extensions")
+            if expert_execution is not None:
+                expert_execution_config = expert_execution
             remote = ext.get("ocudu_remote_control_extensions")
             if remote is not None:
                 remote_control_config = remote
@@ -293,6 +297,7 @@ class ConfigManager:
                 log_config=log_config,
                 hal_config=hal_config,
                 expert_phy_config=expert_phy_config,
+                expert_execution_config=expert_execution_config,
                 metrics_config=metrics_config,
                 remote_control_config=remote_control_config,
                 pcap_config=pcap_config,
