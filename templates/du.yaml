@@ -91,11 +91,17 @@ cell_cfg:
 expert_phy:{% for key, value in expert_phy_config.items() %}
   {{ key }}: {{ value }}{% endfor %}
 {% endif %}
-{% if expert_execution_config.get("main_pool") %}
+{% if expert_execution_config.get("main_pool") or expert_execution_config.get("upper_phy") %}
 expert_execution:
   threads:
+{% if expert_execution_config.get("main_pool") %}
     main_pool:{% for key, value in expert_execution_config.main_pool.items() %}
       {{ key }}: {{ value }}{% endfor %}
+{% endif %}
+{% if expert_execution_config.get("upper_phy") %}
+    upper_phy:{% for key, value in expert_execution_config.upper_phy.items() %}
+      {{ key }}: {{ value }}{% endfor %}
+{% endif %}
 {% endif %}
 {% if testmode_config["enabled"] == "true" -%}
 test_mode:
