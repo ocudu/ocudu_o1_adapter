@@ -433,14 +433,11 @@ if __name__ == "__main__":
                         hostkey_verify=False,
                         look_for_keys=False,
                         allow_agent=False,
+                        # Block in accept() until the O-RU calls home. ncclient defaults to a
+                        # 10s accept timeout, shorter than the 60s default re-call-home timer.
+                        timeout=None,
                     )
                     break
-                except TimeoutError:
-                    # manager.call_home() uses a hard-coded 10s accept timeout, while the
-                    # O-RU re-call-home timer defaults to 60s, so a single accept would
-                    # usually time out first. Keep waiting for the O-RU to connect.
-                    logging.debug("call-home accept timed out, still waiting for the O-RU")
-                    continue
                 except OSError as e:
                     # manager.call_home() does not set SO_REUSEADDR and leaves the listening
                     # socket open on failure, so a retry can hit EADDRINUSE until the previous
