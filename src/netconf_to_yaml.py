@@ -643,6 +643,16 @@ def extract_cucp_config(raw_config, du_cells=None):
             if not field.startswith("@"):  # skip xmltodict namespace attrs (@xmlns)
                 cucp_config["amf"][field] = value
 
+        # Top-level cu_cp scalars. Every scalar leaf of the GNBCUCPFunction extension maps onto a
+        # cu_cp key of the same name, so they are forwarded by shape rather than by name: the
+        # sub-blocks (log, metrics, pcap, remote_control) are containers and are handled elsewhere,
+        # and nRTAC is the one scalar that is consumed above instead of rendered.
+        cucp_ext = nc_cucp_config.get("ocudu_gnbcucpfunction_extensions") or {}
+        for field, value in cucp_ext.items():
+            if field == "nRTAC" or field.startswith("@") or isinstance(value, (dict, list)):
+                continue
+            cucp_config[field] = value
+
         for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
             try:
                 cucp_config[key] = {"bind_addrs": nc_cucp_config[ep]["attributes"]["localAddress"]["ipAddress"]}
