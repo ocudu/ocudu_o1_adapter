@@ -37,6 +37,10 @@ cu_cp:
     {% endfor %}
     {% endif -%}
     {% endfor %}
+{% if cucp_config.rrc is defined %}
+  rrc:{% for key, value in cucp_config.rrc.items() %}
+    {{ key }}: {{ value }}{% endfor %}
+{% endif %}
 {% if cucp_config.mobility is defined %}
   mobility:
     trigger_handover_from_measurements: {{ cucp_config.mobility.trigger_handover_from_measurements }}
