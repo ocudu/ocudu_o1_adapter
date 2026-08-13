@@ -653,6 +653,11 @@ def extract_cucp_config(raw_config, du_cells=None):
                 continue
             cucp_config[field] = value
 
+        # cu_cp.rrc mirrors the OCUDU GNBCUCPFunction rrc container one-for-one.
+        rrc = cucp_ext.get("rrc")
+        if rrc:
+            cucp_config["rrc"] = {k: v for k, v in rrc.items() if not k.startswith("@")}
+
         for ep, key in (("EP_E1", "e1ap"), ("EP_F1C", "f1ap")):
             try:
                 cucp_config[key] = {"bind_addrs": nc_cucp_config[ep]["attributes"]["localAddress"]["ipAddress"]}
