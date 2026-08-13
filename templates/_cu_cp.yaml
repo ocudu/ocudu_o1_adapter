@@ -3,6 +3,9 @@
   SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -#}
 cu_cp:
+{% for key, value in cucp_config.items() if value is string or value is number %}
+  {{ key }}: {{ value }}
+{% endfor %}
   amf:
     {% for key, value in cucp_config.amf.items() -%}
     {% if value is number or value is string -%}
