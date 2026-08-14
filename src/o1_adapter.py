@@ -34,6 +34,7 @@ from config_manager import ConfigManager
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from ru_forwarder import RuForwarder
+from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
 from ves import VesMessages
 
@@ -566,6 +567,8 @@ if __name__ == "__main__":
     # Reduce ncclient verbosity
     logger = logging.getLogger("ncclient")
     logger.setLevel(logging.WARNING)
+
+    restrict_ssh_algorithms()
 
     ves = VesMessages(
         host=cmd_args.ves_host,

@@ -28,6 +28,7 @@ from ncclient.transport import errors as transport_errors
 from ncclient.xml_ import to_ele
 
 from ofh_config_builder import build_ofh_config, print_ofh_config
+from ssh_algorithms import restrict_ssh_algorithms
 
 
 def _extract_bad_element(rpc_error_info):
@@ -417,6 +418,8 @@ if __name__ == "__main__":
     # Reduce ncclient verbosity
     logger = logging.getLogger("ncclient")
     logger.setLevel(logging.WARNING)
+
+    restrict_ssh_algorithms()
 
     session = None  # pylint: disable=invalid-name,duplicate-code
     if not args.dry_run:
