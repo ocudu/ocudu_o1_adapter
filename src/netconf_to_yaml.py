@@ -447,7 +447,7 @@ def extract_cells_config(raw_config):
                 if key == "t_service":
                     ntn_fields[key] = _timestamp_to_unix_ms(value)
                 else:
-                    # Sub-containers (epoch_time, reference_location, polarization, feeder_link)
+                    # Sub-containers (reference_location, polarization, feeder_link)
                     # -> YAML flow mapping so the template's 2-level loop renders them.
                     ntn_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
             new_du_cell["ntn"] = ntn_fields
