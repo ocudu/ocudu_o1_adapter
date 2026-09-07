@@ -17,7 +17,7 @@ from contextlib import suppress
 from ncclient import manager
 from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError
 
-from ru_controller import RuConfig
+from ru_config import RuConfig
 from state import AppState
 
 SYNC_ALLOWED_NAMESPACES = {
