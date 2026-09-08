@@ -1,12 +1,14 @@
 <!--
 SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -->
 
 <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 <user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
- <tx-array-carriers>
-  <name>Tx-Array-Carrier-00</name>
+{% for carrier_name in config.carrier_names %} <tx-array-carriers>
+  <name>{{ carrier_name }}</name>
+  <type>NR</type>
   <absolute-frequency-center>{{ config.dl_arfcn }}</absolute-frequency-center>
   <center-of-channel-bandwidth>{{ config.dl_freq }}</center-of-channel-bandwidth>
   <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
@@ -14,32 +16,5 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
   <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
   <downlink-sfn-offset>0</downlink-sfn-offset>
  </tx-array-carriers>
- <tx-array-carriers>
-  <name>Tx-Array-Carrier-01</name>
-  <absolute-frequency-center>{{ config.dl_arfcn }}</absolute-frequency-center>
-  <center-of-channel-bandwidth>{{ config.dl_freq }}</center-of-channel-bandwidth>
-  <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
-  <gain>{{ config.tx_gain }}</gain>
-  <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
-  <downlink-sfn-offset>0</downlink-sfn-offset>
- </tx-array-carriers>
- <tx-array-carriers>
-  <name>Tx-Array-Carrier-02</name>
-  <absolute-frequency-center>{{ config.dl_arfcn }}</absolute-frequency-center>
-  <center-of-channel-bandwidth>{{ config.dl_freq }}</center-of-channel-bandwidth>
-  <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
-  <gain>{{ config.tx_gain }}</gain>
-  <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
-  <downlink-sfn-offset>0</downlink-sfn-offset>
- </tx-array-carriers>
- <tx-array-carriers>
-  <name>Tx-Array-Carrier-03</name>
-  <absolute-frequency-center>{{ config.dl_arfcn }}</absolute-frequency-center>
-  <center-of-channel-bandwidth>{{ config.dl_freq }}</center-of-channel-bandwidth>
-  <channel-bandwidth>{{ config.rf_bandwidth_hz }}</channel-bandwidth>
-  <gain>{{ config.tx_gain }}</gain>
-  <downlink-radio-frame-offset>0</downlink-radio-frame-offset>
-  <downlink-sfn-offset>0</downlink-sfn-offset>
- </tx-array-carriers>
-</user-plane-configuration>
+{% endfor %}</user-plane-configuration>
 </config>

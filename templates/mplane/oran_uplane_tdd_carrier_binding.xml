@@ -8,11 +8,11 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 <user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
 {% for carrier_name in config.tx_carrier_names %}    <tx-array-carriers>
       <name>{{ carrier_name }}</name>
-      <active>{{ config.state }}</active>
+      <configurable-tdd-pattern>{{ config.tdd_pattern_id }}</configurable-tdd-pattern>
     </tx-array-carriers>
 {% endfor %}{% for carrier_name in config.rx_carrier_names %}    <rx-array-carriers>
       <name>{{ carrier_name }}</name>
-      <active>{{ config.state }}</active>
+      <configurable-tdd-pattern>{{ config.tdd_pattern_id }}</configurable-tdd-pattern>
     </rx-array-carriers>
 {% endfor %}</user-plane-configuration>
 </config>

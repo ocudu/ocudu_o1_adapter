@@ -2,10 +2,11 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
-"""Shared helpers for normalising xmltodict/NETCONF payload values."""
+"""Shared helpers for NETCONF payload values: xmltodict normalisation, rpc-error rendering, capability parsing."""
 
 import xml.etree.ElementTree as ET
-from typing import Any, List
+from typing import Any, List, Optional
+from urllib.parse import parse_qs
 
 
 def ensure_list(value: Any) -> List[Any]:
@@ -61,3 +62,28 @@ def describe_rpc_errors(exc) -> List[str]:
         message = getattr(err, "message", None) or getattr(err, "tag", None) or str(err)
         lines.append(f"{message} — {', '.join(details)}" if details else str(message))
     return lines
+
+
+# RFC 6243 with-defaults capability; the URI query string carries the server's
+# basic-mode and, optionally, the also-supported modes
+WITH_DEFAULTS_CAPABILITY = "urn:ietf:params:netconf:capability:with-defaults:1.0"
+
+
+def with_defaults_mode(server_capabilities, wanted="report-all") -> Optional[str]:
+    """`wanted` when the server's RFC 6243 with-defaults capability lists that mode, else None.
+
+    ncclient validates a requested with-defaults mode against the advertised
+    capability before sending anything (WithDefaultsError otherwise), so a
+    mode is only requested when it is the basic-mode or among the
+    also-supported modes of the capability URI's query string.
+    """
+    for capability in server_capabilities or ():
+        uri, _, query = str(capability).partition("?")
+        if uri != WITH_DEFAULTS_CAPABILITY:
+            continue
+        parameters = parse_qs(query)
+        modes = set(parameters.get("basic-mode", []))
+        for also_supported in parameters.get("also-supported", []):
+            modes.update(mode.strip() for mode in also_supported.split(","))
+        return wanted if wanted in modes else None
+    return None

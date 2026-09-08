@@ -1,57 +1,16 @@
 <!--
 SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -->
 
 <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 <user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0">
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-000</name>
+{% for link in config.links %}  <low-level-rx-links>
+    <name>{{ link.name }}</name>
     <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-00</rx-array-carrier>
-    <low-level-rx-endpoint>sep_rxch1</low-level-rx-endpoint>
+    <rx-array-carrier>{{ link.carrier }}</rx-array-carrier>
+    <low-level-rx-endpoint>{{ link.endpoint }}</low-level-rx-endpoint>
   </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-001</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-01</rx-array-carrier>
-    <low-level-rx-endpoint>sep_rxch2</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-002</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-01</rx-array-carrier>
-    <low-level-rx-endpoint>sep_prach1</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-003</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-00</rx-array-carrier>
-    <low-level-rx-endpoint>sep_prach2</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-004</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-02</rx-array-carrier>
-    <low-level-rx-endpoint>sep_rxch3</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-005</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-03</rx-array-carrier>
-    <low-level-rx-endpoint>sep_rxch4</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-006</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-03</rx-array-carrier>
-    <low-level-rx-endpoint>sep_prach3</low-level-rx-endpoint>
-  </low-level-rx-links>
-  <low-level-rx-links>
-    <name>Low-Level-Rx-Links-007</name>
-    <processing-element>processing-element01</processing-element>
-    <rx-array-carrier>Rx-Array-Carrier-02</rx-array-carrier>
-    <low-level-rx-endpoint>sep_prach4</low-level-rx-endpoint>
-  </low-level-rx-links>
-</user-plane-configuration>
+{% endfor %}</user-plane-configuration>
 </config>

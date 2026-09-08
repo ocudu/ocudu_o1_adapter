@@ -6,14 +6,9 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 <performance-measurement-objects xmlns="urn:o-ran:performance-management:1.0">
-    <enable-file-upload>false</enable-file-upload>
-    <rx-window-measurement-interval>{{ config.rx_window_interval }}</rx-window-measurement-interval>
-    <notification-interval>{{ config.notification_interval }}</notification-interval>
 {% for measurement_object in config.rx_window_objects %}    <rx-window-measurement-objects>
         <measurement-object>{{ measurement_object }}</measurement-object>
-        <active>{{ config.pm_active }}</active>
-        <object-unit>RU</object-unit>
-        <report-info>COUNT</report-info>
+        <active>true</active>
     </rx-window-measurement-objects>
 {% endfor %}</performance-measurement-objects>
 </config>

@@ -1,0 +1,18 @@
+<!--
+SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
+SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+-->
+
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+    <o-ran-uplane-conf:user-plane-configuration xmlns:o-ran-uplane-conf="urn:o-ran:uplane-conf:1.0">
+        <o-ran-uplane-conf:configurable-tdd-patterns>
+            <o-ran-uplane-conf:tdd-pattern-id>{{ config.tdd_pattern_id }}</o-ran-uplane-conf:tdd-pattern-id>
+{% for point in config.switching_points %}            <o-ran-uplane-conf:switching-points>
+                <o-ran-uplane-conf:switching-point-id>{{ point.switching_point_id | default(loop.index) }}</o-ran-uplane-conf:switching-point-id>
+                <o-ran-uplane-conf:direction>{{ point.direction }}</o-ran-uplane-conf:direction>
+                <o-ran-uplane-conf:frame-offset>{{ point.frame_offset }}</o-ran-uplane-conf:frame-offset>
+            </o-ran-uplane-conf:switching-points>
+{% endfor %}        </o-ran-uplane-conf:configurable-tdd-patterns>
+    </o-ran-uplane-conf:user-plane-configuration>
+</config>

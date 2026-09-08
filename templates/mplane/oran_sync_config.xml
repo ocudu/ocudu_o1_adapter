@@ -1,0 +1,16 @@
+<!--
+SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
+SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+-->
+
+<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+<sync xmlns="urn:o-ran:sync:1.0">
+  <ptp-config>
+{% if config.domain_number is not none %}    <domain-number>{{ config.domain_number }}</domain-number>
+{% endif %}{% if config.ptp_profile %}    <ptp-profile>{{ config.ptp_profile }}</ptp-profile>
+{% endif %}{% for clock_class in config.accepted_clock_classes %}    <accepted-clock-classes><clock-classes>{{ clock_class }}</clock-classes></accepted-clock-classes>
+{% endfor %}  </ptp-config>
+{% if config.gnss_enable is not none %}  <gnss-config><enable>{{ 'true' if config.gnss_enable else 'false' }}</enable></gnss-config>
+{% endif %}</sync>
+</config>

@@ -1,12 +1,13 @@
 <!--
 SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -->
 
 <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
   <interface>
-    <name>fronthaul1</name>
+    <name>{{ interface.base_interface | default('fronthaul1') }}</name>
     <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:ethernetCsmacd</type>
     <l2-mtu xmlns="urn:o-ran:interfaces:1.0">9600</l2-mtu>
     <vlan-tagging xmlns="urn:o-ran:interfaces:1.0">true</vlan-tagging>
@@ -27,7 +28,7 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
     <name>uc-vlan{{ interface.vlan }}</name>
     <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:l2vlan</type>
     <enabled>true</enabled>
-    <base-interface xmlns="urn:o-ran:interfaces:1.0">fronthaul1</base-interface>
+    <base-interface xmlns="urn:o-ran:interfaces:1.0">{{ interface.base_interface | default('fronthaul1') }}</base-interface>
     <vlan-id xmlns="urn:o-ran:interfaces:1.0">{{ interface.vlan }}</vlan-id>
     <mac-address xmlns="urn:o-ran:interfaces:1.0">{{ interface.ru_mac_addr }}</mac-address>
   </interface>
