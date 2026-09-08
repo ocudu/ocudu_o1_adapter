@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """
@@ -202,6 +203,7 @@ class RuForwarder:
             ru_session = await self.try_connect()
             if ru_session:
                 self.state.session_state["ru_nc_connected"] = True
+                # acts as sudo: the namespace-filtered payloads go through edit_config, which is not role-gated
                 ru_config = RuConfig(ru_session, self.args.ru_datastore)
 
                 while ru_session.connected:

@@ -38,6 +38,33 @@ from ofh_config_builder import (
 )
 from xml_utils import describe_rpc_errors, ensure_list, with_defaults_mode
 
+# NACM account groups this client can act as — O-RAN WG4 M-plane specification,
+# Table 6.5-1 "Mapping of account groupings to O-RU module privileges".
+ROLE_SUDO = "sudo"
+ROLE_HYBRID_ODU = "hybrid-odu"
+ROLES = (ROLE_SUDO, ROLE_HYBRID_ODU)
+
+# The YANG modules RuConfig writes or resets, per role (Table 6.5-1). hybrid-odu
+# is the O-DU acting as the Mplane client in the hybrid architecture: it also
+# holds write access to o-ran-delay-management and o-ran-module-cap per the
+# table, but this class only reads those, so they are not listed. The
+# ietf-interfaces template carries o-ran-interfaces augments (l2-mtu,
+# vlan-tagging, class-of-service, mac-address, base-interface, vlan-id), which
+# share the read-only standing of ietf-interfaces for hybrid-odu.
+WRITABLE_MODULES = {
+    ROLE_SUDO: frozenset(
+        {
+            "ietf-interfaces",  # set_ietf_interfaces (with the o-ran-interfaces augments)
+            "o-ran-processing-element",  # set_oran_processing_elements
+            "o-ran-uplane-conf",  # endpoints, array carriers, low-level links, TDD pattern + binding, activation
+            "o-ran-performance-management",  # set_oran_perf_measurement / configure_perf_measurement
+            "o-ran-sync",  # set_oran_sync_config
+            "o-ran-supervision",  # supervision-watchdog-reset RPC
+        }
+    ),
+    ROLE_HYBRID_ODU: frozenset({"o-ran-supervision", "o-ran-uplane-conf", "o-ran-processing-element"}),
+}
+
 
 def _measurement_objects_in_error(err, candidates):
     """Measurement-object names from `candidates` the O-RU named in its rpc-error.
@@ -56,10 +83,15 @@ class RuConfig:  # pylint: disable=too-many-public-methods
     A class for configuring ORAN radio units over NETCONF/Mplane interface.
 
     This class provides methods to configure various aspects of radio units including
-    interfaces, processing elements, endpoints, carriers, and activation states.
+    interfaces, processing elements, endpoints, carriers, and activation states. Write
+    methods return True when an edit was sent, False when it was skipped (role or
+    unadvertised feature); failures raise.
     """
 
-    def __init__(self, netconf_manager, datastore):
+    def __init__(self, netconf_manager, datastore, role=ROLE_SUDO):
+        if role not in ROLES:
+            raise ValueError(f"role must be one of {ROLES}, got {role!r}")
+        self.role = role
         self.netconf_manager = netconf_manager
         self.datastore = datastore
         self.operation = "merge"  # 'merge' or 'replace'
@@ -80,12 +112,37 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             "urn:o-ran:performance-management:1.0": None,
         }
 
+    def can_write(self, module) -> bool:
+        """Whether the role may write YANG module `module` (O-RAN WG4 M-plane specification, Table 6.5-1).
+
+        sudo writes every module this class touches; hybrid-odu writes
+        o-ran-supervision, o-ran-uplane-conf and o-ran-processing-element and
+        is read-only on ietf-interfaces (with its o-ran-interfaces augments),
+        o-ran-sync and o-ran-performance-management — those come from the
+        SMO/NMS in a hybrid deployment.
+        """
+        return module in WRITABLE_MODULES[self.role]
+
+    def _writable(self, description, module):
+        """can_write, logging one INFO line for a write the role may not perform."""
+        if self.can_write(module):
+            return True
+        logging.info(
+            "%s: %s is not writable for role %s (O-RAN WG4 M-plane specification, Table 6.5-1); skipped, "
+            "expected to be provisioned by the SMO/NMS",
+            description,
+            module,
+            self.role,
+        )
+        return False
+
     def edit_config(self, xml_request, description="XML config"):
         """Push one edit-config to the O-RU.
 
         A rejected edit raises the ncclient RPCError after its rpc-errors are
         logged; connection, reply-timeout and transport failures are logged
-        once and re-raised. A dry run only logs the payload.
+        once and re-raised. A dry run only logs the payload. Not role-gated:
+        the role check happens in _set_config_from_template, before rendering.
         """
         logging.info("Editing %s", description)
         logging.debug("%s", xml_request)
@@ -95,8 +152,14 @@ class RuConfig:  # pylint: disable=too-many-public-methods
                     config=xml_request, format="xml", target=self.datastore, default_operation=self.operation
                 )
             except rpc_ops.RPCError as e:
-                for line in describe_rpc_errors(e):
-                    logging.error("NETCONF RPC error editing %s: %s", description, line)
+                lines = describe_rpc_errors(e)
+                if any(getattr(err, "tag", None) == "access-denied" for err in (getattr(e, "errors", None) or [e])):
+                    # NACM (RFC 8341) refused the write: the account behind self.role lacks
+                    # the privilege — a role/account misconfiguration, not an O-RU rejection
+                    logging.error("NACM denied %s for role %s: %s", description, self.role, "; ".join(lines))
+                else:
+                    for line in lines:
+                        logging.error("NETCONF RPC error editing %s: %s", description, line)
                 raise
             except (ConnectionError, TimeoutError, TimeoutExpiredError, transport_errors.TransportError) as e:
                 logging.error("Error editing %s: %s", description, e)
@@ -111,7 +174,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         generated names (defaults preserve the legacy 4x4 layout); entry and
         carrier counts follow the resolved endpoints. skip_activation=True
         leaves the carriers inactive so activation can be gated on sync (see
-        activate_full_config).
+        activate_full_config). Writes the role may not perform are logged and
+        skipped (hybrid-odu: the interface step); the rest still applies.
         """
         endpoint_config = config_dict["endpoint"]
         plan = self._resolve_endpoints(endpoint_config)
@@ -169,7 +233,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         activation edit from fatal to a warning: some O-RU NETCONF servers
         accept the edit but never reply when carriers are already active, and
         carrier state is asynchronous either way — the array-carriers state
-        readback, not the edit reply, is the activation receipt.
+        readback, not the edit reply, is the activation receipt. Returns the
+        activation edit's result; False also when the timeout was tolerated.
         """
         plan = self._resolve_endpoints(config_dict["endpoint"])
         activation_config = dict(config_dict["activation"])
@@ -177,7 +242,7 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         activation_config.setdefault("nof_tx_carriers", len(plan["tx"]))
         activation_config.setdefault("nof_rx_carriers", len(plan["rx"]))
         try:
-            self.set_oran_uplane_carrier_active(activation_config)
+            return self.set_oran_uplane_carrier_active(activation_config)
         except TimeoutExpiredError:
             if not tolerate_timeout:
                 raise
@@ -186,24 +251,33 @@ class RuConfig:  # pylint: disable=too-many-public-methods
                 "tolerated (activation.tolerate_reply_timeout) — verify via the "
                 "array-carriers state readback"
             )
+            return False
 
     def _render_template(self, template_name, **kwargs):
         template = self._jinja_env.get_template(template_name)
         return template.render(**kwargs)
 
-    def _set_config_from_template(self, template_name, description, config_data=None, **template_kwargs):
+    def _set_config_from_template(self, template_name, description, config_data=None, *, module, **template_kwargs):
+        """Render and push a template; False (nothing sent) when the role may not write `module`."""
+        if not self._writable(description, module):
+            return False
         if config_data is not None:
             template_kwargs["config"] = config_data
         xml_request = self._render_template(template_name, **template_kwargs)
         self.edit_config(xml_request, description)
+        return True
 
     def set_ietf_interfaces(self, ietf_config):
         """Set IETF interfaces configuration."""
-        self._set_config_from_template("ietf_interfaces.xml", "IETF interfaces", interface=ietf_config)
+        return self._set_config_from_template(
+            "ietf_interfaces.xml", "IETF interfaces", interface=ietf_config, module="ietf-interfaces"
+        )
 
     def set_oran_processing_elements(self, proc_config):
         """Set ORAN processing elements configuration."""
-        self._set_config_from_template("oran_processing_elements.xml", "ORAN processing elements", proc_config)
+        return self._set_config_from_template(
+            "oran_processing_elements.xml", "ORAN processing elements", proc_config, module="o-ran-processing-element"
+        )
 
     # Legacy 4x4 fronthaul layout, preserved as the default eAxC assignment
     _DEFAULT_DL_PORT_IDS = (0, 1, 2, 3)
@@ -259,7 +333,9 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             raise ValueError("tx endpoint config requires num_prb and frame_structure")
         rendered = dict(tx_config)
         rendered["endpoints"] = self._resolve_endpoints(tx_config)["tx"]
-        self._set_config_from_template("oran_uplane_tx_endpoints.xml", "ORAN Uplane Tx endpoints elements", rendered)
+        return self._set_config_from_template(
+            "oran_uplane_tx_endpoints.xml", "ORAN Uplane Tx endpoints elements", rendered, module="o-ran-uplane-conf"
+        )
 
     def set_oran_uplane_rx_endpoints(self, rx_config):
         """Set ORAN U-plane RX endpoints configuration.
@@ -291,14 +367,18 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             }
             for entry in plan["prach"]
         ]
-        self._set_config_from_template("oran_uplane_rx_endpoints.xml", "ORAN Uplane Rx endpoints elements", rendered)
+        return self._set_config_from_template(
+            "oran_uplane_rx_endpoints.xml", "ORAN Uplane Rx endpoints elements", rendered, module="o-ran-uplane-conf"
+        )
 
     def set_oran_uplane_tx_array_carriers(self, tx_carrier_config):
         """Set ORAN U-plane TX array carriers configuration (nof_carriers, default 4)."""
         count = int(tx_carrier_config.get("nof_carriers") or len(self._DEFAULT_DL_PORT_IDS))
         rendered = dict(tx_carrier_config)
         rendered["carrier_names"] = [f"Tx-Array-Carrier-{index:02d}" for index in range(count)]
-        self._set_config_from_template("oran_uplane_tx_array_carriers.xml", "ORAN Uplane Tx array carriers", rendered)
+        return self._set_config_from_template(
+            "oran_uplane_tx_array_carriers.xml", "ORAN Uplane Tx array carriers", rendered, module="o-ran-uplane-conf"
+        )
 
     def set_oran_uplane_rx_array_carriers(self, rx_carrier_config):
         """Set ORAN U-plane RX array carriers configuration.
@@ -311,7 +391,9 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         rendered = dict(rx_carrier_config)
         rendered.setdefault("n_ta_offset", self._DEFAULT_N_TA_OFFSET_TC)
         rendered["carrier_names"] = [f"Rx-Array-Carrier-{index:02d}" for index in range(count)]
-        self._set_config_from_template("oran_uplane_rx_array_carriers.xml", "ORAN Uplane Rx array carriers", rendered)
+        return self._set_config_from_template(
+            "oran_uplane_rx_array_carriers.xml", "ORAN Uplane Rx array carriers", rendered, module="o-ran-uplane-conf"
+        )
 
     def set_oran_uplane_low_level_tx_links(self, dl_port_id=None, naming=None, endpoint_names=None):
         """Set ORAN U-plane low level TX links (one per DL endpoint).
@@ -332,8 +414,11 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             }
             for index, endpoint_name in enumerate(endpoint_names)
         ]
-        self._set_config_from_template(
-            "oran_uplane_low_level_tx_links.xml", "ORAN Uplane low level Tx links", {"links": links}
+        return self._set_config_from_template(
+            "oran_uplane_low_level_tx_links.xml",
+            "ORAN Uplane low level Tx links",
+            {"links": links},
+            module="o-ran-uplane-conf",
         )
 
     def set_oran_uplane_low_level_rx_links(  # pylint: disable=too-many-arguments
@@ -365,8 +450,11 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             {"name": f"Low-Level-Rx-Links-{index:03d}", "carrier": carrier, "endpoint": endpoint}
             for index, (carrier, endpoint) in enumerate(entries)
         ]
-        self._set_config_from_template(
-            "oran_uplane_low_level_rx_links.xml", "ORAN Uplane low level Rx links", {"links": links}
+        return self._set_config_from_template(
+            "oran_uplane_low_level_rx_links.xml",
+            "ORAN Uplane low level Rx links",
+            {"links": links},
+            module="o-ran-uplane-conf",
         )
 
     # Fronthaul reception-window counters (o-ran-pm-rx-windows-stats) activated by default
@@ -388,7 +476,9 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         pm_config keys (all optional): rx_window_objects (measurement-object
         names to activate as RU-level COUNT counters), rx_window_interval and
         notification_interval (seconds). File upload stays disabled; results
-        are reported via measurement-result-stats notifications.
+        are reported via measurement-result-stats notifications. Returns False
+        (nothing sent) when the role may not write o-ran-performance-management,
+        True after both edits.
         """
         pm_config = pm_config or {}
         rendered_config = {
@@ -400,9 +490,18 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         # activate in a separate edit-config, so object parameter changes
         # never coincide with an active measurement.
         rendered_config["pm_active"] = "false"
-        self._set_config_from_template("oran_perf_measurement.xml", "ORAN Performance measurements", rendered_config)
-        self._set_config_from_template(
-            "oran_perf_measurement_activate.xml", "ORAN Performance measurement activation", rendered_config
+        if not self._set_config_from_template(
+            "oran_perf_measurement.xml",
+            "ORAN Performance measurements",
+            rendered_config,
+            module="o-ran-performance-management",
+        ):
+            return False
+        return self._set_config_from_template(
+            "oran_perf_measurement_activate.xml",
+            "ORAN Performance measurement activation",
+            rendered_config,
+            module="o-ran-performance-management",
         )
 
     def configure_perf_measurement(self, pm_config=None):
@@ -415,15 +514,16 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         converging on the objects the O-RU actually supports — so no per-RU
         object list is required. An rpc-error that names no configured object is
         not an object-support failure and propagates unchanged; transport
-        failures always propagate. Returns the list of active objects (empty if
-        the O-RU supported none).
+        failures always propagate. Returns the list of active objects; [] means
+        the O-RU supported none or the write was skipped by role.
         """
         pm_config = dict(pm_config or {})
         objects = list(pm_config.get("rx_window_objects", self._DEFAULT_RX_WINDOW_OBJECTS))
         dropped: list = []
         while objects:
             try:
-                self.set_oran_perf_measurement({**pm_config, "rx_window_objects": objects})
+                if not self.set_oran_perf_measurement({**pm_config, "rx_window_objects": objects}):
+                    return []
             except rpc_ops.RPCError as err:
                 rejected = _measurement_objects_in_error(err, objects)
                 if not rejected:
@@ -452,7 +552,9 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         rendered = dict(active_config)
         rendered["tx_carrier_names"] = [f"Tx-Array-Carrier-{index:02d}" for index in range(tx_count)]
         rendered["rx_carrier_names"] = [f"Rx-Array-Carrier-{index:02d}" for index in range(rx_count)]
-        self._set_config_from_template("oran_uplane_carrier_active.xml", "ORAN Uplane carrier active", rendered)
+        return self._set_config_from_template(
+            "oran_uplane_carrier_active.xml", "ORAN Uplane carrier active", rendered, module="o-ran-uplane-conf"
+        )
 
     # The canonical 7d1s2u (6 DL / 4 guard / 4 UL special slot) pattern at
     # 30 kHz — the legacy hardcoded template's shape, kept as the default
@@ -477,7 +579,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         computation entirely — the escape hatch for O-RUs that validate
         boundaries differently than TS 38.211 CP-inclusive symbol edges.
         Returns False without pushing when the O-RU does not advertise
-        CONFIGURABLE-TDD-PATTERN-SUPPORTED; True after a push.
+        CONFIGURABLE-TDD-PATTERN-SUPPORTED or the role may not write
+        o-ran-uplane-conf; True after a push.
         """
         if not self._is_configurable_tdd_supported():
             logging.info("O-RU does not advertise CONFIGURABLE-TDD-PATTERN-SUPPORTED; skipping TDD pattern")
@@ -498,11 +601,13 @@ class RuConfig:  # pylint: disable=too-many-public-methods
                 raise ValueError(
                     f"tdd pattern config requires scs_khz, dl_ul_tx_period and nof_dl_slots (missing {err})"
                 ) from err
-        self._set_config_from_template(
+        if not self._set_config_from_template(
             "oran_uplane_tdd_pattern.xml",
             "ORAN Uplane TDD pattern",
             {"tdd_pattern_id": tdd_config.get("tdd_pattern_id", 1), "switching_points": switching_points},
-        )
+            module="o-ran-uplane-conf",
+        ):
+            return False
         if tdd_config.get("nof_tx_carriers") or tdd_config.get("nof_rx_carriers"):
             self.bind_tdd_pattern_to_carriers(
                 tdd_pattern_id=tdd_config.get("tdd_pattern_id", 1),
@@ -531,7 +636,7 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         single source of truth; the retired hardcoded template carried the
         same shape with mid-symbol offsets (see compute_tdd_switching_points).
         """
-        self.set_oran_uplane_tdd_pattern(dict(self._DEFAULT_TDD_PATTERN))
+        return self.set_oran_uplane_tdd_pattern(dict(self._DEFAULT_TDD_PATTERN))
 
     def bind_tdd_pattern_to_carriers(self, tdd_pattern_id=1, nof_tx_carriers=None, nof_rx_carriers=None):
         """Bind a configurable TDD pattern to the tx/rx array carriers.
@@ -545,7 +650,7 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         """
         if not self._is_configurable_tdd_supported():
             logging.info("O-RU does not advertise CONFIGURABLE-TDD-PATTERN-SUPPORTED; skipping TDD carrier binding")
-            return
+            return False
         tx_count = int(nof_tx_carriers or len(self._DEFAULT_DL_PORT_IDS))
         rx_count = int(nof_rx_carriers or len(self._DEFAULT_UL_PORT_IDS))
         rendered = {
@@ -553,8 +658,11 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             "tx_carrier_names": [f"Tx-Array-Carrier-{index:02d}" for index in range(tx_count)],
             "rx_carrier_names": [f"Rx-Array-Carrier-{index:02d}" for index in range(rx_count)],
         }
-        self._set_config_from_template(
-            "oran_uplane_tdd_carrier_binding.xml", "ORAN Uplane TDD carrier binding", rendered
+        return self._set_config_from_template(
+            "oran_uplane_tdd_carrier_binding.xml",
+            "ORAN Uplane TDD carrier binding",
+            rendered,
+            module="o-ran-uplane-conf",
         )
 
     def was_operation_successful(self, result):
@@ -665,7 +773,9 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             "ptp_profile": ptp_profile,
             "gnss_enable": gnss_enable,
         }
-        self._set_config_from_template("oran_sync_config.xml", "ORAN sync configuration", sync_config)
+        return self._set_config_from_template(
+            "oran_sync_config.xml", "ORAN sync configuration", sync_config, module="o-ran-sync"
+        )
 
     def get_sync_status(self, strict=False):
         """Get the O-RU's sync-status (config false) with graceful absence.
@@ -848,11 +958,14 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         guard-timer-overhead; the O-RU arms its watchdog for interval + guard
         seconds and returns next-update-at.
         """
+        if not self._writable("supervision-watchdog-reset", "o-ran-supervision"):
+            return False
         rendered = self._render_template(
             "oran_supervision_watchdog_reset.xml", config={"interval": interval, "guard": guard}
         )
         reply = self.netconf_manager.dispatch(to_ele(rendered))
         logging.debug("supervision-watchdog-reset reply: %s", getattr(reply, "xml", reply))
+        return True
 
     def supervise(self, interval, guard):
         """Keep an O-RU supervision session alive, driven by notifications.

@@ -25,7 +25,7 @@ from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 
 from ofh_config_builder import compute_frame_structure, compute_num_prb
-from ru_config import RuConfig
+from ru_config import ROLE_SUDO, ROLES, RuConfig
 from ssh_algorithms import restrict_ssh_algorithms
 
 if __name__ == "__main__":
@@ -44,6 +44,13 @@ if __name__ == "__main__":
     parser.add_argument("--callhome-port", type=int, default=4334, help="TCP port to listen on for call-home")
     parser.add_argument("--callhome-bind", type=str, default="0.0.0.0", help="Address to bind the call-home listener")
     parser.add_argument("-d", "--datastore", type=str, default="running", help="Datastore to use")
+    parser.add_argument(
+        "--role",
+        choices=ROLES,
+        default=ROLE_SUDO,
+        help="NACM account group to act as (O-RAN WG4 M-plane specification, Table 6.5-1); "
+        "writes the role may not perform are skipped",
+    )
     parser.add_argument("--get_config", action="store_true", help="Get current RU config")
     parser.add_argument(
         "--prach_endpoint_names",
@@ -213,7 +220,7 @@ if __name__ == "__main__":
 
     try:
         # inside the try so a template or rendering failure still closes the session
-        ru_controller = RuConfig(session, args.datastore)
+        ru_controller = RuConfig(session, args.datastore, role=args.role)
 
         if args.get_config:
             endpoint_config = None  # pylint: disable=invalid-name

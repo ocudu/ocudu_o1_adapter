@@ -147,6 +147,41 @@ the reason Mplane exists:
   report-all is requested, and ncclient refuses to send a mode the server
   did not list.
 
+## Roles
+
+The client acts as one of two NACM account groups from the O-RAN WG4 M-plane
+specification, Table 6.5-1 (`RuConfig(..., role=)`; CLI `--role`; default
+`sudo`). `sudo` writes every module the client touches: `ietf-interfaces`
+(with its `o-ran-interfaces` augments), `o-ran-processing-element`,
+`o-ran-uplane-conf`, `o-ran-performance-management`, `o-ran-sync` and the
+`o-ran-supervision` watchdog-reset RPC. `hybrid-odu` — the O-DU acting as the
+Mplane client in the hybrid architecture — writes `o-ran-supervision`,
+`o-ran-uplane-conf` and `o-ran-processing-element` (the table also grants it
+`o-ran-delay-management` and `o-ran-module-cap`, which the client only reads)
+and is read-only on `ietf-interfaces` / `o-ran-interfaces`, `o-ran-sync` and
+`o-ran-performance-management`. The `smo` group is read-only on
+`o-ran-uplane-conf`, `o-ran-delay-management` and `o-ran-module-cap`, so in a
+hybrid deployment those writes can only come from the O-DU side.
+
+A write the role may not perform is skipped before any RPC, with one INFO line
+(`<edit>: <module> is not writable for role hybrid-odu (O-RAN WG4 M-plane
+specification, Table 6.5-1); skipped, expected to be provisioned by the
+SMO/NMS`): in `hybrid-odu`, `set_full_config()` skips the VLAN interface step
+and applies everything else, while `--set_pm` / `configure_perf_measurement()`
+and `set_oran_sync_config()` are skipped entirely. Reads and waits are
+unaffected. Write methods return `True` when an edit was sent and `False` when
+it was skipped (role or unadvertised feature); failures raise. An
+`access-denied` rpc-error on a write the table does allow is logged as a NACM
+denial (an account/role mismatch, not an O-RU rejection) and raised like any
+other rpc-error. The adapter's `--ru_forward` path constructs its `RuConfig`
+as `sudo` and pushes the forwarded payloads through `edit_config`, which is
+not role-gated.
+
+```
+# provision as the O-DU account of a hybrid deployment
+./ru_controller.py --host <ru> -u <odu-user> -p <pass> --role hybrid-odu --set_full_config ...
+```
+
 ## CLI quick reference
 
 ```

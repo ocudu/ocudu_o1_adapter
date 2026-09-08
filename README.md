@@ -72,7 +72,9 @@ the stand-alone CLI in `src/ru_controller.py`. It provisions the fronthaul
 activation), derives the DU timing windows from the O-RU's delay-management
 data, discovers capabilities through the yang-library, keeps the supervision
 session alive, configures performance measurements and reads the
-synchronization state. See [docs/mplane-client.md](docs/mplane-client.md).
+synchronization state. `--role` selects the NACM account group the client
+acts as (`sudo`, the default, or `hybrid-odu` per the O-RAN WG4 M-plane
+specification, Table 6.5-1). See [docs/mplane-client.md](docs/mplane-client.md).
 
 ## RU controller
 
