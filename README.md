@@ -63,6 +63,17 @@ With the option `--ru_forward` the O1 Adapter automatically forwards configurati
 $ python3 src/o1_adapter.py --netconf_host <DU-IP-ADDRESS> --netconf_username <DU-NETCONF-USERNAME> --netconf_password <DU-USER-PASSWORD> --ru_forward --ru_netconf_host <RU-IP-ADDRESS> --ru_netconf_username <RU-NETCONF-USERNAME> --ru_netconf_password <RU-USER-PASSWORD>
 ```
 
+## O-RU Mplane
+
+The adapter includes an Mplane client for O-RAN WG4 O-RUs: the `RuConfig`
+library in `src/ru_config.py` (also driven by the `--ru_forward` path) and
+the stand-alone CLI in `src/ru_controller.py`. It provisions the fronthaul
+(interfaces, processing element, endpoints, carriers, links, TDD pattern and
+activation), derives the DU timing windows from the O-RU's delay-management
+data, discovers capabilities through the yang-library, keeps the supervision
+session alive, configures performance measurements and reads the
+synchronization state. See [docs/mplane-client.md](docs/mplane-client.md).
+
 ## RU controller
 
 The RU controller is a stand-alone application to configure an O-RU over Mplane.
