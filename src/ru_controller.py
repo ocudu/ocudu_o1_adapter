@@ -24,6 +24,7 @@ from ncclient import manager
 from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 
+from ofh_config_builder import compute_frame_structure, compute_num_prb
 from ru_config import RuConfig
 from ssh_algorithms import restrict_ssh_algorithms
 
@@ -44,7 +45,18 @@ if __name__ == "__main__":
     parser.add_argument("--callhome-bind", type=str, default="0.0.0.0", help="Address to bind the call-home listener")
     parser.add_argument("-d", "--datastore", type=str, default="running", help="Datastore to use")
     parser.add_argument("--get_config", action="store_true", help="Get current RU config")
+    parser.add_argument(
+        "--prach_endpoint_names",
+        type=str,
+        default=None,
+        help="Comma-separated names of the O-RU's PRACH rx endpoints, used to classify "
+        "endpoints when deriving the DU config (--get_config) — needed for O-RUs whose "
+        "endpoint names do not reveal PRACH",
+    )
     parser.add_argument("--set_full_config", action="store_true", help="Set full RU config")
+    parser.add_argument(
+        "--set_pm", action="store_true", help="Activate the RU's fronthaul rx-window performance counters"
+    )
 
     # IETF interface config
     parser.add_argument("--set_interface", action="store_true", help="Set IETF interface config")
@@ -70,6 +82,14 @@ if __name__ == "__main__":
     parser.add_argument("--tx_gain", type=float, default=27.0, help="Tx gain")
     parser.add_argument("--ul_arfcn", type=int, default=640000, help="DL ARFCN")
     parser.add_argument("--ul_freq", type=int, default=3600000000, help="UL frequency in Hz")
+    parser.add_argument(
+        "--n_ta_offset",
+        type=int,
+        default=None,
+        help="rx-array-carriers n-ta-offset in Tc (TS 38.133 Table 7.1.2-2); omitted -> 25600 (FR1 FDD, and FR1 TDD "
+        "without LTE-NR coexistence); 0 for FR1 FDD with LTE-NR coexistence, 39936 for FR1 TDD with LTE-NR "
+        "coexistence, 13792 for FR2",
+    )
 
     # Carrier activation
     parser.add_argument("--activate_carriers", action="store_true", help="Whether to apply Tx/Rx carriers are active")
@@ -87,6 +107,28 @@ if __name__ == "__main__":
         "--supervision-interval", type=int, default=60, help="supervision-notification-interval in seconds"
     )
     parser.add_argument("--supervision-guard", type=int, default=10, help="guard-timer-overhead in seconds")
+    parser.add_argument(
+        "--wait-sync-locked",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="Wait up to SECONDS for the O-RU to report sync-state LOCKED before activating carriers (0 = no wait)",
+    )
+    parser.add_argument(
+        "--wait-carriers-ready",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="After activation, poll up to SECONDS for every array-carrier to report READY and log the result "
+        "as the activation receipt (carrier state is asynchronous; 0 = no readback)",
+    )
+
+    # Fronthaul transport delay bounds (microseconds), used to derive the DU
+    # t1a/ta4 timing windows from the O-RU's o-ran-delay-management profile
+    parser.add_argument("--t12-min", type=int, default=0, help="Min DU->RU transport delay in microseconds")
+    parser.add_argument("--t12-max", type=int, default=0, help="Max DU->RU transport delay in microseconds")
+    parser.add_argument("--t34-min", type=int, default=0, help="Min RU->DU transport delay in microseconds")
+    parser.add_argument("--t34-max", type=int, default=0, help="Max RU->DU transport delay in microseconds")
 
     # Misc arguments
     parser.add_argument("--dry-run", action="store_true", help="Just print config but don't apply")
@@ -174,7 +216,25 @@ if __name__ == "__main__":
         ru_controller = RuConfig(session, args.datastore)
 
         if args.get_config:
-            ru_controller.get_full_config()
+            endpoint_config = None  # pylint: disable=invalid-name
+            if args.prach_endpoint_names:
+                endpoint_config = {
+                    "prach_endpoints": [
+                        {"name": name.strip()} for name in args.prach_endpoint_names.split(",") if name.strip()
+                    ]
+                }
+            ru_controller.get_full_config(
+                transport_delays_ns={
+                    "t12_min_ns": args.t12_min * 1000,
+                    "t12_max_ns": args.t12_max * 1000,
+                    "t34_min_ns": args.t34_min * 1000,
+                    "t34_max_ns": args.t34_max * 1000,
+                },
+                endpoint_config=endpoint_config,
+            )
+
+        if args.set_pm:
+            ru_controller.configure_perf_measurement()
 
         # Enable all base configs
         if args.set_full_config:
@@ -197,32 +257,17 @@ if __name__ == "__main__":
             ru_controller.set_oran_processing_elements(oran_processing_config)
 
         if args.set_endpoints:
-
-            def _get_num_prb(rf_bandwidth_mhz):
-                prb_lookup = {100: 273, 80: 217, 40: 106, 20: 51, 10: 24}
-                try:
-                    return prb_lookup[rf_bandwidth_mhz]
-                except KeyError:
-                    logging.error("Unsupported RF bandwidth: %s MHz", rf_bandwidth_mhz)
-                    return None
-
-            # TODO: verify frame structure values
-            def _get_frame_struct(rf_bandwidth_mhz):
-                if rf_bandwidth_mhz == 100:
-                    return 193
-                if rf_bandwidth_mhz == 40:
-                    return 177
-                if rf_bandwidth_mhz == 20:
-                    return 161
-                if rf_bandwidth_mhz == 10:
-                    return 145
-                return None
+            rf_bandwidth_mhz = int(args.rf_bandwidth_hz / 1e6)
+            num_prb = compute_num_prb(rf_bandwidth_mhz)
+            if num_prb is None:
+                logging.error("Unsupported RF bandwidth: %s MHz", rf_bandwidth_mhz)
+                sys.exit(1)
 
             uplane_endpoint_config = {
                 "iq_bitwidth": args.iq_bitwidth,
                 "compression_type": args.compression_type,
-                "num_prb": _get_num_prb(args.rf_bandwidth_hz / 1e6),
-                "frame_structure": _get_frame_struct(args.rf_bandwidth_hz / 1e6),
+                "num_prb": num_prb,
+                "frame_structure": compute_frame_structure(num_prb),
             }
             ru_controller.set_oran_uplane_tx_endpoints(uplane_endpoint_config)
             ru_controller.set_oran_uplane_rx_endpoints(uplane_endpoint_config)
@@ -236,15 +281,35 @@ if __name__ == "__main__":
                 "tx_gain": args.tx_gain,
                 "rf_bandwidth_hz": args.rf_bandwidth_hz,
             }
+            if args.n_ta_offset is not None:
+                uplane_carrier_config["n_ta_offset"] = args.n_ta_offset
             ru_controller.set_oran_uplane_tx_array_carriers(uplane_carrier_config)
             ru_controller.set_oran_uplane_rx_array_carriers(uplane_carrier_config)
             ru_controller.set_oran_uplane_low_level_tx_links()
             ru_controller.set_oran_uplane_low_level_rx_links()
             ru_controller.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
+            ru_controller.bind_tdd_pattern_to_carriers()
 
         if args.activate_carriers:
+            if (
+                args.wait_sync_locked
+                and args.carrier_state == "ACTIVE"
+                and not args.dry_run
+                and not ru_controller.wait_for_sync_locked(timeout_s=args.wait_sync_locked)
+            ):
+                logging.error("O-RU did not reach sync-state LOCKED; skipping carrier activation")
+                sys.exit(1)
             carrier_activation_config = {"state": args.carrier_state}
             ru_controller.set_oran_uplane_carrier_active(carrier_activation_config)
+            if args.wait_carriers_ready and args.carrier_state == "ACTIVE" and not args.dry_run:
+                receipt = ru_controller.wait_for_carriers_ready(timeout_s=args.wait_carriers_ready)
+                summary = (  # pylint: disable=invalid-name
+                    ", ".join(f"{name}={state}" for name, state in sorted(receipt.items())) or "none exposed"
+                )
+                if receipt and all(state == "READY" for state in receipt.values()):
+                    logging.info("Carrier activation receipt: %s", summary)
+                else:
+                    logging.warning("Carriers not all READY (state is asynchronous): %s", summary)
 
         if args.supervise:
             ru_controller.supervise(args.supervision_interval, args.supervision_guard)
