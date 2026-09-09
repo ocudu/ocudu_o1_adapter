@@ -222,7 +222,10 @@ not role-gated.
 
 `--callhome` accepts an O-RU-initiated NETCONF call-home connection
 (`--callhome-port`, default 4334) instead of dialing out. `--dry-run` prints
-the rendered payloads without touching the O-RU.
+the rendered payloads without touching the O-RU. `--rpc_log FILE` records the
+raw NETCONF conversation — every rpc, rpc-reply and notification as sent on
+the wire — to FILE (both the CLI and the adapter accept it), which is the
+primary evidence when a real O-RU rejects or ignores something.
 
 ## Known limits
 

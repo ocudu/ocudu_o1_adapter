@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """
@@ -33,6 +34,7 @@ from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
+from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_forwarder import RuForwarder
 from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
@@ -416,6 +418,7 @@ if __name__ == "__main__":
         default="running",
         help="RU datastore to use",
     )
+    add_rpc_log_argument(parser)
 
     parser.add_argument(
         "--datastore",
@@ -580,9 +583,13 @@ if __name__ == "__main__":
     )
     logging.info("OCUDU O1 adapter")
 
-    # Reduce ncclient verbosity
-    logger = logging.getLogger("ncclient")
-    logger.setLevel(logging.WARNING)
+    if cmd_args.rpc_log:
+        enable_rpc_log(cmd_args.rpc_log)
+        logging.info("Recording the NETCONF conversation to %s", cmd_args.rpc_log)
+    else:
+        # Reduce ncclient verbosity
+        logger = logging.getLogger("ncclient")
+        logger.setLevel(logging.WARNING)
 
     restrict_ssh_algorithms()
 

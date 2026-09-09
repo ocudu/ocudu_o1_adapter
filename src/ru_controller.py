@@ -27,6 +27,7 @@ from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 
 from ofh_config_builder import compute_frame_structure, compute_num_prb
+from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES, RuConfig
 from ssh_algorithms import restrict_ssh_algorithms
 
@@ -207,15 +208,20 @@ if __name__ == "__main__":
         help="Log level",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Do I really need to explain?")
+    add_rpc_log_argument(parser)
 
     args = parser.parse_args()
 
     logging.basicConfig(format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s", level=args.log_level)
     logging.info("OCUDU mplane controller")
 
-    # Reduce ncclient verbosity
-    logger = logging.getLogger("ncclient")
-    logger.setLevel(logging.WARNING)
+    if args.rpc_log:
+        enable_rpc_log(args.rpc_log)
+        logging.info("Recording the NETCONF conversation to %s", args.rpc_log)
+    else:
+        # Reduce ncclient verbosity
+        logger = logging.getLogger("ncclient")
+        logger.setLevel(logging.WARNING)
 
     restrict_ssh_algorithms()
 
