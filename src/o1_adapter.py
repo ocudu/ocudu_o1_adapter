@@ -43,6 +43,10 @@ app = Flask(__name__)
 
 RETRY_INTERVAL = 5  # seconds
 
+# ncclient reads ~/.ssh/known_hosts and takes another location only through an ssh_config, so
+# --netconf_known_hosts is passed to it in one written here. Fixed path: rewritten every start.
+NETCONF_SSH_CONFIG = "/tmp/netconf_ssh_config"
+
 
 def configure_app(state: AppState, auto_heal=False):
     """
@@ -115,7 +119,8 @@ async def try_connect(args, alarm_mgr):
                     port=args.netconf_port,
                     username=args.netconf_username,
                     password=args.netconf_password,
-                    hostkey_verify=False,
+                    hostkey_verify=args.netconf_hostkey_verify,
+                    ssh_config=args.netconf_ssh_config,
                     allow_agent=False,
                     look_for_keys=False,
                     timeout=RETRY_INTERVAL,
@@ -349,6 +354,17 @@ if __name__ == "__main__":
         help="SSH pass",
     )
     parser.add_argument(
+        "--netconf_hostkey_verify",
+        action="store_true",
+        help="Verify the NETCONF server's SSH host key against --netconf_known_hosts",
+    )
+    parser.add_argument(
+        "--netconf_known_hosts",
+        type=str,
+        default="/etc/netconf-ssh/known_hosts",
+        help="known_hosts file carrying the NETCONF server's SSH host key",
+    )
+    parser.add_argument(
         "--netconf_tls",
         action="store_true",
         help="Connect to the NETCONF server over TLS (RFC 7589) instead of SSH",
@@ -569,6 +585,30 @@ if __name__ == "__main__":
     logger.setLevel(logging.WARNING)
 
     restrict_ssh_algorithms()
+
+    cmd_args.netconf_ssh_config = None
+    if cmd_args.netconf_hostkey_verify and cmd_args.netconf_tls:
+        # Helm passes both flags whenever a host key secret exists, but connect_tls has no host
+        # key to check.
+        logging.info("--netconf_hostkey_verify ignored: --netconf_tls authenticates the server by certificate")
+    elif cmd_args.netconf_hostkey_verify:
+        if not os.access(cmd_args.netconf_known_hosts, os.R_OK):
+            parser.error(f"--netconf_known_hosts '{cmd_args.netconf_known_hosts}' is missing or unreadable")
+        # ncclient narrows the transport to the algorithm names known_hosts yielded, and an RSA
+        # key is recorded as 'ssh-rsa' while the server offers only rsa-sha2-256/512 - so key
+        # exchange would fail with "no acceptable host key", naming neither RSA nor this file.
+        with open(cmd_args.netconf_known_hosts, encoding="utf-8") as known_hosts:
+            for line in known_hosts:
+                fields = line.split()
+                if len(fields) >= 3 and fields[1] == "ssh-rsa":
+                    parser.error(
+                        f"--netconf_known_hosts '{cmd_args.netconf_known_hosts}' records an RSA host key for "
+                        f"{fields[0]}, which cannot be verified. Provision an ed25519 or ecdsa host key instead."
+                    )
+        with open(NETCONF_SSH_CONFIG, "w", encoding="utf-8") as ssh_config:
+            ssh_config.write(f"Host *\n    UserKnownHostsFile {cmd_args.netconf_known_hosts}\n")
+        cmd_args.netconf_ssh_config = NETCONF_SSH_CONFIG
+        logging.info("Verifying the NETCONF server host key against %s", cmd_args.netconf_known_hosts)
 
     ves = VesMessages(
         host=cmd_args.ves_host,
