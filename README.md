@@ -45,6 +45,32 @@ To reset the health status send the following command to the server:
 
 An example Docker and k8s integration is provided.
 
+### Verifying the NETCONF server's SSH host key
+
+The adapter accepts whatever SSH host key the server presents unless `--netconf_hostkey_verify`
+is given. With the flag it checks the key against `--netconf_known_hosts`
+(default `/etc/netconf-ssh/known_hosts`) and refuses to start if that file is missing:
+
+```
+$ python3 src/o1_adapter.py --netconf_hostkey_verify --netconf_known_hosts ./known_hosts
+```
+
+The entry has to name the port whenever it is not 22:
+
+```bash
+printf '[%s]:%s %s\n' localhost 830 "$(cut -d' ' -f1,2 ./ssh_host_ed25519_key.pub)" > known_hosts
+```
+
+Provision the server to match — see *Provision the SSH host key* in the `ocudu_netconf` README,
+or `o1.netconfServer.ssh.hostKeySecret` under Helm — otherwise the key changes on every netconf
+image rebuild. The key has to be ed25519 or ecdsa: an RSA one is recorded in `known_hosts` as
+`ssh-rsa` while the server offers only `rsa-sha2-512`/`rsa-sha2-256`, and ncclient narrows the
+transport to the recorded name, so key exchange finds nothing in common. Such a `known_hosts`
+file is refused at startup rather than failing later in the handshake.
+
+`--netconf_tls` authenticates the server by certificate instead, and then logs this flag as
+ignored.
+
 ### Adapter component profiles
 
 The adapter ships templates for the following gNB split components: `gnb.yaml`, `cu.yaml`, `cucp.yaml`, `cuup.yaml` and `du.yaml`. Select one with `--profile`, e.g.:
