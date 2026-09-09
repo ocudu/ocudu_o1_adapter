@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """
@@ -20,6 +21,7 @@ import sys
 import time
 
 from ncclient import manager
+from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 
 from ru_config import RuConfig
@@ -167,79 +169,92 @@ if __name__ == "__main__":
                 logging.error("Couldn't connect to sysrepo on RU: %s", e)
                 sys.exit(1)
 
-    ru_controller = RuConfig(session, args.datastore)
+    try:
+        # inside the try so a template or rendering failure still closes the session
+        ru_controller = RuConfig(session, args.datastore)
 
-    if args.get_config:
-        ru_controller.get_full_config()
+        if args.get_config:
+            ru_controller.get_full_config()
 
-    # Enable all base configs
-    if args.set_full_config:
-        args.set_interface = True
-        args.set_proc_elem = True
-        args.set_endpoints = True
-        args.set_carriers = True
-        args.activate_carriers = True
+        # Enable all base configs
+        if args.set_full_config:
+            args.set_interface = True
+            args.set_proc_elem = True
+            args.set_endpoints = True
+            args.set_carriers = True
+            args.activate_carriers = True
 
-    if args.set_interface:
-        ietf_interface_config = {"ru_mac_addr": args.ru_mac_addr, "vlan": args.vlan}
-        ru_controller.set_ietf_interfaces(ietf_interface_config)
+        if args.set_interface:
+            ietf_interface_config = {"ru_mac_addr": args.ru_mac_addr, "vlan": args.vlan}
+            ru_controller.set_ietf_interfaces(ietf_interface_config)
 
-    if args.set_proc_elem:
-        oran_processing_config = {"ru_mac_addr": args.ru_mac_addr, "du_mac_addr": args.du_mac_addr, "vlan": args.vlan}
-        ru_controller.set_oran_processing_elements(oran_processing_config)
+        if args.set_proc_elem:
+            oran_processing_config = {
+                "ru_mac_addr": args.ru_mac_addr,
+                "du_mac_addr": args.du_mac_addr,
+                "vlan": args.vlan,
+            }
+            ru_controller.set_oran_processing_elements(oran_processing_config)
 
-    if args.set_endpoints:
+        if args.set_endpoints:
 
-        def _get_num_prb(rf_bandwidth_mhz):
-            prb_lookup = {100: 273, 80: 217, 40: 106, 20: 51, 10: 24}
-            try:
-                return prb_lookup[rf_bandwidth_mhz]
-            except KeyError:
-                logging.error("Unsupported RF bandwidth: %s MHz", rf_bandwidth_mhz)
+            def _get_num_prb(rf_bandwidth_mhz):
+                prb_lookup = {100: 273, 80: 217, 40: 106, 20: 51, 10: 24}
+                try:
+                    return prb_lookup[rf_bandwidth_mhz]
+                except KeyError:
+                    logging.error("Unsupported RF bandwidth: %s MHz", rf_bandwidth_mhz)
+                    return None
+
+            # TODO: verify frame structure values
+            def _get_frame_struct(rf_bandwidth_mhz):
+                if rf_bandwidth_mhz == 100:
+                    return 193
+                if rf_bandwidth_mhz == 40:
+                    return 177
+                if rf_bandwidth_mhz == 20:
+                    return 161
+                if rf_bandwidth_mhz == 10:
+                    return 145
                 return None
 
-        # TODO: verify frame structure values
-        def _get_frame_struct(rf_bandwidth_mhz):
-            if rf_bandwidth_mhz == 100:
-                return 193
-            if rf_bandwidth_mhz == 40:
-                return 177
-            if rf_bandwidth_mhz == 20:
-                return 161
-            if rf_bandwidth_mhz == 10:
-                return 145
-            return None
+            uplane_endpoint_config = {
+                "iq_bitwidth": args.iq_bitwidth,
+                "compression_type": args.compression_type,
+                "num_prb": _get_num_prb(args.rf_bandwidth_hz / 1e6),
+                "frame_structure": _get_frame_struct(args.rf_bandwidth_hz / 1e6),
+            }
+            ru_controller.set_oran_uplane_tx_endpoints(uplane_endpoint_config)
+            ru_controller.set_oran_uplane_rx_endpoints(uplane_endpoint_config)
 
-        uplane_endpoint_config = {
-            "iq_bitwidth": args.iq_bitwidth,
-            "compression_type": args.compression_type,
-            "num_prb": _get_num_prb(args.rf_bandwidth_hz / 1e6),
-            "frame_structure": _get_frame_struct(args.rf_bandwidth_hz / 1e6),
-        }
-        ru_controller.set_oran_uplane_tx_endpoints(uplane_endpoint_config)
-        ru_controller.set_oran_uplane_rx_endpoints(uplane_endpoint_config)
+        if args.set_carriers:
+            uplane_carrier_config = {
+                "dl_arfcn": args.dl_arfcn,
+                "dl_freq": args.dl_freq,
+                "ul_arfcn": args.ul_arfcn,
+                "ul_freq": args.ul_freq,
+                "tx_gain": args.tx_gain,
+                "rf_bandwidth_hz": args.rf_bandwidth_hz,
+            }
+            ru_controller.set_oran_uplane_tx_array_carriers(uplane_carrier_config)
+            ru_controller.set_oran_uplane_rx_array_carriers(uplane_carrier_config)
+            ru_controller.set_oran_uplane_low_level_tx_links()
+            ru_controller.set_oran_uplane_low_level_rx_links()
+            ru_controller.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
 
-    if args.set_carriers:
-        uplane_carrier_config = {
-            "dl_arfcn": args.dl_arfcn,
-            "dl_freq": args.dl_freq,
-            "ul_arfcn": args.ul_arfcn,
-            "ul_freq": args.ul_freq,
-            "tx_gain": args.tx_gain,
-            "rf_bandwidth_hz": args.rf_bandwidth_hz,
-        }
-        ru_controller.set_oran_uplane_tx_array_carriers(uplane_carrier_config)
-        ru_controller.set_oran_uplane_rx_array_carriers(uplane_carrier_config)
-        ru_controller.set_oran_uplane_low_level_tx_links()
-        ru_controller.set_oran_uplane_low_level_rx_links()
-        ru_controller.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
+        if args.activate_carriers:
+            carrier_activation_config = {"state": args.carrier_state}
+            ru_controller.set_oran_uplane_carrier_active(carrier_activation_config)
 
-    if args.activate_carriers:
-        carrier_activation_config = {"state": args.carrier_state}
-        ru_controller.set_oran_uplane_carrier_active(carrier_activation_config)
-
-    if args.supervise:
-        ru_controller.supervise(args.supervision_interval, args.supervision_guard)
-
-    if session is not None:
-        session.close_session()
+        if args.supervise:
+            ru_controller.supervise(args.supervision_interval, args.supervision_guard)
+    except (OperationError, TimeoutExpiredError, ConnectionError, TimeoutError, transport_errors.TransportError):
+        # Already logged at the raise site; preserve the CLI exit code. ncclient's
+        # OperationError covers RPCError; TimeoutExpiredError is its reply timeout.
+        sys.exit(1)
+    finally:
+        if session is not None:
+            try:
+                session.close_session()
+            except transport_errors.TransportError:
+                pass

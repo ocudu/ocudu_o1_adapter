@@ -19,6 +19,7 @@ from xml.parsers.expat import ExpatError
 import xmltodict
 from jinja2 import Environment, FileSystemLoader
 from ncclient.operations import rpc as rpc_ops
+from ncclient.operations.errors import TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 from ncclient.xml_ import to_ele
 
@@ -52,7 +53,12 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         }
 
     def edit_config(self, xml_request, description="XML config"):
-        """Edit configuration via NETCONF."""
+        """Push one edit-config to the O-RU.
+
+        A rejected edit raises the ncclient RPCError after its rpc-errors are
+        logged; connection, reply-timeout and transport failures are logged
+        once and re-raised. A dry run only logs the payload.
+        """
         logging.info("Editing %s", description)
         logging.debug("%s", xml_request)
         if not self.dry_run:
@@ -63,10 +69,10 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             except rpc_ops.RPCError as e:
                 for line in describe_rpc_errors(e):
                     logging.error("NETCONF RPC error editing %s: %s", description, line)
-                sys.exit(1)
-            except (ConnectionError, TimeoutError, transport_errors.SessionCloseError) as e:
-                logging.error("Error occurred during operation: %s", e)
-                sys.exit(1)
+                raise
+            except (ConnectionError, TimeoutError, TimeoutExpiredError, transport_errors.TransportError) as e:
+                logging.error("Error editing %s: %s", description, e)
+                raise
 
     def set_full_config(self, config_dict):
         """Set the complete configuration for the radio unit."""
