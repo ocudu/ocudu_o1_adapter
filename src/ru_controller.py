@@ -34,11 +34,19 @@ from ssh_algorithms import restrict_ssh_algorithms
 def supervise(ru_config, interval, guard, max_notifications=None):
     """Keep an O-RU supervision session alive, driven by notifications.
 
-    Reset the O-RU watchdog each time a supervision-notification arrives, never on
-    a fixed timer (a timer based reset would mask a real O-RU failure). No initial
-    reset is sent: the O-RU supervises with its default timers and notifies on its
-    own, so the client only reacts. Blocks for the process lifetime; a transport
-    failure or rpc-error is logged and re-raised for the caller to exit on.
+    Subscribes on ru_config.supervision_manager — the session the watchdog reset
+    is dispatched on, since o-ran-supervision timers are per NETCONF session —
+    and resets the O-RU watchdog each time a supervision-notification arrives,
+    never on a fixed timer (a timer based reset would mask a genuine O-RU
+    failure). No initial reset is sent: this loop keeps the react-only policy,
+    where the O-RU supervises with its default timers and notifies on its own.
+    A resident supervising session differs here and sends one reset right after
+    subscribing, because the O-RU's supervision budget starts when it enters
+    supervised mode on subscription; that policy belongs to such a session, not
+    to this one-shot loop. When the O-RU keeps its own timers it says so in the
+    reply's error-message, logged at WARNING. Blocks for the process lifetime; a
+    transport failure or rpc-error is logged and re-raised for the caller to
+    exit on.
 
     max_notifications: stop after handling this many supervision-notifications
     (None = run until the session fails). Intended for tests and bounded runs.
@@ -49,11 +57,12 @@ def supervise(ru_config, interval, guard, max_notifications=None):
     supervision_tag = "{urn:o-ran:supervision:1.0}supervision-notification"
     timeout = interval + guard
     handled = 0
+    supervision_session = ru_config.supervision_manager
     try:
-        ru_config.netconf_manager.create_subscription()
+        supervision_session.create_subscription()
         logging.info("Supervision started; waiting for supervision-notifications")
         while True:
-            notification = ru_config.netconf_manager.take_notification(block=True, timeout=timeout)
+            notification = supervision_session.take_notification(block=True, timeout=timeout)
             if notification is None:
                 logging.warning("No supervision-notification within %ss; O-RU may be unresponsive", timeout)
                 continue
@@ -61,7 +70,9 @@ def supervise(ru_config, interval, guard, max_notifications=None):
                 logging.debug("Ignoring non-supervision notification")
                 continue
             logging.info("supervision-notification received; resetting watchdog")
-            ru_config._reset_supervision_watchdog(interval, guard)  # pylint: disable=protected-access
+            reply = ru_config.reset_supervision_watchdog(interval, guard)
+            if reply.get("error_message"):
+                logging.warning("O-RU adjusted the supervision timers: %s", reply["error_message"])
             handled += 1
             if max_notifications is not None and handled >= max_notifications:
                 logging.info("Supervision stopping after %d notification(s)", handled)

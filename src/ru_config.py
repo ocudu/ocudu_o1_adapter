@@ -77,7 +77,7 @@ def _measurement_objects_in_error(err, candidates):
     return [obj for obj in candidates if re.search(rf"\b{re.escape(obj)}\b", text)]
 
 
-class RuConfig:  # pylint: disable=too-many-public-methods
+class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """
     A class for configuring ORAN radio units over NETCONF/Mplane interface.
 
@@ -87,12 +87,19 @@ class RuConfig:  # pylint: disable=too-many-public-methods
     unadvertised feature); failures raise.
     """
 
-    def __init__(self, netconf_manager, datastore, role=ROLE_SUDO):
+    def __init__(self, netconf_manager, datastore, role=ROLE_SUDO, supervision_manager=None):
         if role not in ROLES:
             raise ValueError(f"role must be one of {ROLES}, got {role!r}")
         self.role = role
         self.netconf_manager = netconf_manager
         self.datastore = datastore
+        # o-ran-supervision watchdog timers are per NETCONF session, held by
+        # the session that subscribed to supervision-notifications. When the
+        # notification stream lives on a separate session, watchdog resets
+        # must be dispatched on THAT session — an O-RU answers resets on any
+        # other session with an rpc-error and its timer starves. Everything
+        # else stays on netconf_manager.
+        self.supervision_manager = supervision_manager or netconf_manager
         self.operation = "merge"  # 'merge' or 'replace'
         self.dry_run = self.netconf_manager is None
         template_dir = Path(__file__).resolve().parent.parent / "templates" / "mplane"
@@ -950,18 +957,41 @@ class RuConfig:  # pylint: disable=too-many-public-methods
             return {}
         return parsed.get("rpc-reply", {}).get("data", {})
 
-    def _reset_supervision_watchdog(self, interval, guard):
-        """Send an o-ran-supervision supervision-watchdog-reset RPC.
+    def reset_supervision_watchdog(self, interval, guard):
+        """Send an o-ran-supervision supervision-watchdog-reset RPC on supervision_manager.
 
-        interval maps to supervision-notification-interval and guard to
-        guard-timer-overhead; the O-RU arms its watchdog for interval + guard
-        seconds and returns next-update-at.
+        interval maps to supervision-notification-interval, guard to
+        guard-timer-overhead. Returns the parsed RPC output as
+        {"next_update_at", "error_message"} (None-valued when absent, on a
+        dry run, or when the role may not write o-ran-supervision): the
+        O-RU may lawfully keep its own timers, reflected in next-update-at
+        with error-message saying why.
         """
-        if not self._writable("supervision-watchdog-reset", "o-ran-supervision"):
-            return False
+        result: dict = {"next_update_at": None, "error_message": None}
+        if self.dry_run:
+            logging.debug("Dry run: not sending supervision-watchdog-reset")
+            return result
+        if not self.can_write("o-ran-supervision"):
+            logging.info(
+                "supervision-watchdog-reset: o-ran-supervision is not writable for role %s (O-RAN WG4 M-plane "
+                "specification, Table 6.5-1); skipped, the O-RU keeps its own supervision timers",
+                self.role,
+            )
+            return result
         rendered = self._render_template(
             "oran_supervision_watchdog_reset.xml", config={"interval": interval, "guard": guard}
         )
-        reply = self.netconf_manager.dispatch(to_ele(rendered))
+        reply = self.supervision_manager.dispatch(to_ele(rendered))
         logging.debug("supervision-watchdog-reset reply: %s", getattr(reply, "xml", reply))
-        return True
+        reply_xml = getattr(reply, "xml", None)
+        if not reply_xml:
+            return result
+        try:
+            root = ET.fromstring(reply_xml)
+        except ET.ParseError:
+            return result
+        for key, leaf in (("next_update_at", "next-update-at"), ("error_message", "error-message")):
+            node = root.find(f".//{{urn:o-ran:supervision:1.0}}{leaf}")
+            if node is not None and node.text:
+                result[key] = node.text.strip()
+        return result

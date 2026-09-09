@@ -138,7 +138,17 @@ the reason Mplane exists:
   watchdog loop — resets on each supervision-notification, never on a blind
   timer. It blocks for the process lifetime, so it lives in the CLI module
   rather than in the `RuConfig` library class; `max_notifications=` bounds
-  it for tests.
+  it for tests. `reset_supervision_watchdog(interval, guard)` returns the
+  parsed RPC output (`next-update-at`, `error-message`): the O-RU may
+  lawfully keep its own timers and say so. The reset is dispatched on
+  `supervision_manager` (`RuConfig(..., supervision_manager=)`, defaulting
+  to the command session): o-ran-supervision timers are per NETCONF
+  session, held by the session that subscribed, so a client that subscribes
+  on a second session must reset from that one — an O-RU answers a reset on
+  any other session with an rpc-error and its watchdog starves. `supervise()`
+  subscribes and reads notifications on that same session, sends no initial
+  reset (the O-RU notifies on its own timers first), and logs the reply's
+  `error-message` at WARNING when the O-RU kept its own timers.
 - `get_sync_status(strict=)` / `wait_for_sync_locked(timeout)`: carrier
   activation requires a synchronized O-RU (WG4 activation precondition) and
   synchronization state is read-only on many O-RUs — the client can only
