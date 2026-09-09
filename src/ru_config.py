@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """
@@ -22,24 +23,7 @@ from ncclient.transport import errors as transport_errors
 from ncclient.xml_ import to_ele
 
 from ofh_config_builder import build_ofh_config, print_ofh_config
-
-
-def _extract_bad_element(rpc_error_info):
-    """Extract the bad-element name from an RPCError's info field, or return None."""
-    if not rpc_error_info:
-        return None
-    # ncclient parses error-info with xmltodict, so info is usually a dict
-    if isinstance(rpc_error_info, dict):
-        return rpc_error_info.get("bad-element")
-    # Fall back to XML parsing when info arrives as a raw string
-    if isinstance(rpc_error_info, str):
-        try:
-            root = ET.fromstring(rpc_error_info)
-            el = root.find(".//{*}bad-element") or root.find(".//bad-element")
-            return el.text if el is not None else None
-        except ET.ParseError:
-            return None
-    return None
+from xml_utils import describe_rpc_errors
 
 
 class RuConfig:  # pylint: disable=too-many-public-methods
@@ -77,21 +61,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods
                     config=xml_request, format="xml", target=self.datastore, default_operation=self.operation
                 )
             except rpc_ops.RPCError as e:
-                details = []
-                if e.path:
-                    details.append(f"path: {e.path}")
-                bad_element = _extract_bad_element(e.info)
-                if bad_element:
-                    details.append(f"bad-element: {bad_element}")
-                if details:
-                    logging.error(
-                        "NETCONF RPC error editing %s (%s) — %s",
-                        description,
-                        e.message or e.tag,
-                        ", ".join(details),
-                    )
-                else:
-                    logging.error("NETCONF RPC error editing %s: %s", description, e)
+                for line in describe_rpc_errors(e):
+                    logging.error("NETCONF RPC error editing %s: %s", description, line)
                 sys.exit(1)
             except (ConnectionError, TimeoutError, transport_errors.SessionCloseError) as e:
                 logging.error("Error occurred during operation: %s", e)
