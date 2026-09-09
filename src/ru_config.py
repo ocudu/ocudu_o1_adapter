@@ -671,23 +671,6 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
             module="o-ran-uplane-conf",
         )
 
-    def was_operation_successful(self, result):
-        """Check if NETCONF operation was successful."""
-        # Define the namespace
-        namespaces = {"nc": "urn:ietf:params:xml:ns:netconf:base:1.0"}
-
-        # Parse the XML
-        root = ET.fromstring(result)
-
-        # Check for success
-        ok_element = root.find("nc:ok", namespaces)
-        if ok_element is not None:
-            print("NETCONF operation was successful.")
-            return True
-
-        print("NETCONF operation failed or returned a different response.")
-        return False
-
     def get_uplane_config(self):
         """Get U-plane configuration from the radio unit."""
         uplane_filter = """<user-plane-configuration xmlns="urn:o-ran:uplane-conf:1.0"/>"""
