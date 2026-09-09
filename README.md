@@ -91,16 +91,29 @@ $ python3 src/o1_adapter.py --netconf_host <DU-IP-ADDRESS> --netconf_username <D
 
 ## O-RU Mplane
 
-The adapter includes an Mplane client for O-RAN WG4 O-RUs: the `RuConfig`
-library in `src/ru_config.py` (also driven by the `--ru_forward` path) and
-the stand-alone CLI in `src/ru_controller.py`. It provisions the fronthaul
-(interfaces, processing element, endpoints, carriers, links, TDD pattern and
-activation), derives the DU timing windows from the O-RU's delay-management
-data, discovers capabilities through the yang-library, keeps the supervision
-session alive, configures performance measurements and reads the
-synchronization state. `--role` selects the NACM account group the client
-acts as (`sudo`, the default, or `hybrid-odu` per the O-RAN WG4 M-plane
-specification, Table 6.5-1). See [docs/mplane-client.md](docs/mplane-client.md).
+The adapter includes an Mplane client for O-RAN WG4 O-RUs, in two layers:
+
+* **Client / CLI**: the `RuConfig` library in `src/ru_config.py` (also
+  driven by the `--ru_forward` path) and the stand-alone CLI in
+  `src/ru_controller.py`. It provisions the fronthaul (interfaces,
+  processing element, endpoints, carriers, links, TDD pattern and
+  activation), derives the DU timing windows from the O-RU's
+  delay-management data, discovers capabilities through the yang-library,
+  keeps the supervision session alive, configures performance measurements
+  and reads the synchronization state. `--role` selects the NACM account
+  group the client acts as (`sudo`, the default, or `hybrid-odu` per the
+  O-RAN WG4 M-plane specification, Table 6.5-1). See
+  [docs/mplane-client.md](docs/mplane-client.md).
+* **Service** (`--ru_supervise`): a resident supervised Mplane session owned
+  by the adapter — reconnecting, notification-driven supervision for the
+  process lifetime, optional call-home (`--ru_callhome`, RFC 8071), and the
+  session lifecycle surfaced in the shared state, the log and alarms
+  1003/1004. `--profile ru` runs it without the DU-facing loops. See
+  [docs/mplane-service.md](docs/mplane-service.md).
+
+Development and testing against a simulated O-RU is described in
+[docs/mplane-sim-testing.md](docs/mplane-sim-testing.md). `--rpc_log FILE`
+(CLI and adapter) records the raw NETCONF conversation.
 
 ## RU controller
 

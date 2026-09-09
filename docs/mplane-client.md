@@ -236,4 +236,5 @@ primary evidence when a real O-RU rejects or ignores something.
   (`set_oran_sync_config()`) and is vendor-dependent; treat sync as
   read-only unless the O-RU documents otherwise.
 - One-shot by design: nothing restarts a `--supervise` loop that lost its
+  session; see [mplane-service.md](mplane-service.md) for the resident
   session.
