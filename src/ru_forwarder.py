@@ -39,6 +39,14 @@ class RuForwarder:
         self.state = state
         self.args = args
         self.alarm_mgr = alarm_mgr
+        # Alarm 1003 (RU NETCONF connection) has a single writer. With
+        # --ru_supervise the resident M-plane session owns it: this loop
+        # re-sets the alarm unconditionally on every exit and AlarmManager
+        # re-emits on a message-text change, so the forwarder's writes
+        # would mask a session outage behind their own set/clear churn.
+        # Forwarder connect failures are then logged only — no alarm id
+        # covers the forwarder while the session owns 1003.
+        self.owns_connection_alarm = not getattr(args, "ru_supervise", False)
         self.retry_interval = retry_interval
 
     def _data_xml_to_edit_config_xml(self, data_xml, include_namespaces=None):
@@ -177,10 +185,11 @@ class RuForwarder:
                     # timeout=self.retry_interval,
                 )
                 logging.info("Connected to RU NETCONF server")
-                self.alarm_mgr.clear_alarm(
-                    1003,
-                    message="RU NETCONF connection restored",
-                )
+                if self.owns_connection_alarm:
+                    self.alarm_mgr.clear_alarm(
+                        1003,
+                        message="RU NETCONF connection restored",
+                    )
                 return netconf_manager
 
             return await asyncio.to_thread(connect)
@@ -191,10 +200,11 @@ class RuForwarder:
             SessionCloseError,
         ) as e:
             logging.warning("RU NETCONF connection failed: %s", e)
-            self.alarm_mgr.set_alarm(
-                1003,
-                message="RU NETCONF connection lost",
-            )
+            if self.owns_connection_alarm:
+                self.alarm_mgr.set_alarm(
+                    1003,
+                    message="RU NETCONF connection lost",
+                )
             return None
 
     async def run(self):
@@ -234,9 +244,10 @@ class RuForwarder:
             if self.state.session_state.get("ru_nc_connected"):
                 self.state.session_state["ru_nc_connected"] = False
 
-            self.alarm_mgr.set_alarm(
-                1003,
-                message="RU NETCONF connection lost",
-            )
+            if self.owns_connection_alarm:
+                self.alarm_mgr.set_alarm(
+                    1003,
+                    message="RU NETCONF connection lost",
+                )
             logging.debug("Retrying RU NETCONF forwarder in %s seconds...", self.retry_interval)
             await asyncio.sleep(self.retry_interval)

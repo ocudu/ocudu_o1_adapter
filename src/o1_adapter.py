@@ -32,6 +32,7 @@ from ncclient.transport.errors import AuthenticationError, SessionCloseError, SS
 from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
+from mplane_session import du_facing_loops_enabled, MplaneSession
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from rpc_log import add_rpc_log_argument, enable_rpc_log
@@ -294,14 +295,21 @@ async def orchestrator(args, alarm_mgr):
     # Create shared state
     state = AppState()
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
+    mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
     pm_metrics = PmMetrics(state, args.profile)
 
     configure_app(state, args.autoheal)
 
+    # Skip the DU-facing loops (NETCONF session toward the DU, PM websocket)
+    # when managing an O-RU — see mplane_session.du_facing_loops_enabled.
+    # pm_metrics.run_pusher is an independent queue consumer and stays.
+    run_netconf_main, run_ws_handler = du_facing_loops_enabled(args.profile, ru_forwarder is not None)
+
     await asyncio.gather(
-        netconf_main(state, args, alarm_mgr, ru_forwarder),
+        netconf_main(state, args, alarm_mgr, ru_forwarder) if run_netconf_main else asyncio.sleep(0),
         ru_forwarder.run() if ru_forwarder else asyncio.sleep(0),
-        ws_handler(state, args, alarm_mgr, pm_metrics),
+        mplane_session.run() if mplane_session else asyncio.sleep(0),
+        ws_handler(state, args, alarm_mgr, pm_metrics) if run_ws_handler else asyncio.sleep(0),
         pm_metrics.run_pusher(),
         ptp_log_monitor(args.ptp_log, state.ptp_stats_queue) if args.ptp_log else asyncio.sleep(0),
         (
@@ -417,6 +425,41 @@ if __name__ == "__main__":
         type=str,
         default="running",
         help="RU datastore to use",
+    )
+    parser.add_argument(
+        "--ru_supervise",
+        action="store_true",
+        help="Maintain a persistent supervised M-plane session to the RU NETCONF server",
+    )
+    parser.add_argument(
+        "--ru_callhome",
+        action="store_true",
+        help="Accept the RU's NETCONF call-home (RFC 8071) instead of connecting out — "
+        "for O-RUs that accept no inbound connections; requires the RU to advertise :interleave",
+    )
+    parser.add_argument(
+        "--ru_callhome_port",
+        type=int,
+        default=4334,
+        help="TCP port to listen on for the RU's call-home",
+    )
+    parser.add_argument(
+        "--ru_callhome_bind",
+        type=str,
+        default="0.0.0.0",
+        help="Address to bind the call-home listener",
+    )
+    parser.add_argument(
+        "--ru_supervision_interval",
+        type=int,
+        default=60,
+        help="o-ran-supervision notification interval in seconds",
+    )
+    parser.add_argument(
+        "--ru_supervision_guard",
+        type=int,
+        default=10,
+        help="o-ran-supervision guard timer overhead in seconds",
     )
     add_rpc_log_argument(parser)
 
@@ -564,9 +607,11 @@ if __name__ == "__main__":
         # ru profile doesn't render a yaml; ConfigManager won't read this.
         cmd_args.template = f"{cmd_args.profile}.yaml"
 
-    if cmd_args.ru_forward:
+    if cmd_args.ru_forward or cmd_args.ru_supervise:
         missing_ru_args = []
-        if not cmd_args.ru_netconf_host:
+        # the flag carries a default, so only an explicitly emptied host is
+        # rejected — and not with call-home, where the O-RU dials in
+        if not cmd_args.ru_netconf_host and not cmd_args.ru_callhome:
             missing_ru_args.append("--ru_netconf_host")
         if not cmd_args.ru_netconf_username:
             missing_ru_args.append("--ru_netconf_username")
@@ -574,8 +619,21 @@ if __name__ == "__main__":
             missing_ru_args.append("--ru_netconf_password")
         if missing_ru_args:
             parser.error(
-                "Missing required RU NETCONF arguments when --ru_forward is set: " + ", ".join(missing_ru_args)
+                "Missing required RU NETCONF arguments when --ru_forward/--ru_supervise is set: "
+                + ", ".join(missing_ru_args)
             )
+        # o-ran-supervision models both timers as uint16 seconds
+        if not 1 <= cmd_args.ru_supervision_interval <= 65535 or not 0 <= cmd_args.ru_supervision_guard <= 65535:
+            parser.error(
+                "--ru_supervision_interval must be 1..65535 and --ru_supervision_guard 0..65535 "
+                "(o-ran-supervision uint16 seconds)"
+            )
+
+    if cmd_args.ru_callhome:
+        if not cmd_args.ru_supervise:
+            parser.error("--ru_callhome requires --ru_supervise (the call-home listener is the M-plane session's)")
+        if not 1 <= cmd_args.ru_callhome_port <= 65535:
+            parser.error("--ru_callhome_port must be 1..65535 (a TCP port)")
 
     logging.basicConfig(
         format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s",
