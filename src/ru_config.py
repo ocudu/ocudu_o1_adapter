@@ -11,7 +11,6 @@ It is a library module shared by the stand-alone RU controller CLI and by the O1
 
 import logging
 import re
-import sys
 import time
 import xml.dom.minidom
 import xml.etree.ElementTree as ET
@@ -966,33 +965,3 @@ class RuConfig:  # pylint: disable=too-many-public-methods
         reply = self.netconf_manager.dispatch(to_ele(rendered))
         logging.debug("supervision-watchdog-reset reply: %s", getattr(reply, "xml", reply))
         return True
-
-    def supervise(self, interval, guard):
-        """Keep an O-RU supervision session alive, driven by notifications.
-
-        Reset the O-RU watchdog each time a supervision-notification arrives, never on
-        a fixed timer (a timer based reset would mask a real O-RU failure). No initial
-        reset is sent: the O-RU supervises with its default timers and notifies on its
-        own, so the client only reacts.
-        """
-        if self.dry_run:
-            logging.info("Dry run: skipping supervision loop")
-            return
-        supervision_tag = "{urn:o-ran:supervision:1.0}supervision-notification"
-        timeout = interval + guard
-        try:
-            self.netconf_manager.create_subscription()
-            logging.info("Supervision started; waiting for supervision-notifications")
-            while True:
-                notification = self.netconf_manager.take_notification(block=True, timeout=timeout)
-                if notification is None:
-                    logging.warning("No supervision-notification within %ss; O-RU may be unresponsive", timeout)
-                    continue
-                if ET.fromstring(notification.notification_xml).find(".//" + supervision_tag) is None:
-                    logging.debug("Ignoring non-supervision notification")
-                    continue
-                logging.info("supervision-notification received; resetting watchdog")
-                self._reset_supervision_watchdog(interval, guard)
-        except (transport_errors.TransportError, rpc_ops.RPCError) as err:
-            logging.error("Supervision failed: %s", err)
-            sys.exit(1)

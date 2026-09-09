@@ -19,14 +19,57 @@ import errno
 import logging
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 from ncclient import manager
+from ncclient.operations import rpc as rpc_ops
 from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 
 from ofh_config_builder import compute_frame_structure, compute_num_prb
 from ru_config import ROLE_SUDO, ROLES, RuConfig
 from ssh_algorithms import restrict_ssh_algorithms
+
+
+def supervise(ru_config, interval, guard, max_notifications=None):
+    """Keep an O-RU supervision session alive, driven by notifications.
+
+    Reset the O-RU watchdog each time a supervision-notification arrives, never on
+    a fixed timer (a timer based reset would mask a real O-RU failure). No initial
+    reset is sent: the O-RU supervises with its default timers and notifies on its
+    own, so the client only reacts. Blocks for the process lifetime; a transport
+    failure or rpc-error is logged and re-raised for the caller to exit on.
+
+    max_notifications: stop after handling this many supervision-notifications
+    (None = run until the session fails). Intended for tests and bounded runs.
+    """
+    if ru_config.dry_run:
+        logging.info("Dry run: skipping supervision loop")
+        return
+    supervision_tag = "{urn:o-ran:supervision:1.0}supervision-notification"
+    timeout = interval + guard
+    handled = 0
+    try:
+        ru_config.netconf_manager.create_subscription()
+        logging.info("Supervision started; waiting for supervision-notifications")
+        while True:
+            notification = ru_config.netconf_manager.take_notification(block=True, timeout=timeout)
+            if notification is None:
+                logging.warning("No supervision-notification within %ss; O-RU may be unresponsive", timeout)
+                continue
+            if ET.fromstring(notification.notification_xml).find(".//" + supervision_tag) is None:
+                logging.debug("Ignoring non-supervision notification")
+                continue
+            logging.info("supervision-notification received; resetting watchdog")
+            ru_config._reset_supervision_watchdog(interval, guard)  # pylint: disable=protected-access
+            handled += 1
+            if max_notifications is not None and handled >= max_notifications:
+                logging.info("Supervision stopping after %d notification(s)", handled)
+                return
+    except (transport_errors.TransportError, rpc_ops.RPCError) as err:
+        logging.error("Supervision failed: %s", err)
+        raise
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OCUDU O-RU controller.")
@@ -327,7 +370,7 @@ if __name__ == "__main__":
                     logging.warning("Carriers not all READY (state is asynchronous): %s", summary)
 
         if args.supervise:
-            ru_controller.supervise(args.supervision_interval, args.supervision_guard)
+            supervise(ru_controller, args.supervision_interval, args.supervision_guard)
     except (OperationError, TimeoutExpiredError, ConnectionError, TimeoutError, transport_errors.TransportError):
         # Already logged at the raise site; preserve the CLI exit code. ncclient's
         # OperationError covers RPCError; TimeoutExpiredError is its reply timeout.

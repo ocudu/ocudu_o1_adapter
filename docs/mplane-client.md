@@ -134,8 +134,11 @@ the reason Mplane exists:
 
 ## Supervision and sync
 
-- `supervise(interval, guard)`: notification-driven watchdog loop — resets
-  on each supervision-notification, never on a blind timer.
+- `ru_controller.supervise(ru_config, interval, guard)`: notification-driven
+  watchdog loop — resets on each supervision-notification, never on a blind
+  timer. It blocks for the process lifetime, so it lives in the CLI module
+  rather than in the `RuConfig` library class; `max_notifications=` bounds
+  it for tests.
 - `get_sync_status(strict=)` / `wait_for_sync_locked(timeout)`: carrier
   activation requires a synchronized O-RU (WG4 activation precondition) and
   synchronization state is read-only on many O-RUs — the client can only
