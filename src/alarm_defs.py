@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """Self-defined alarm definitions for a gNB."""
@@ -27,6 +28,12 @@ class AlarmDefinitions:
         AlarmDefinition(
             alarm_id=1003,
             name="RU_NETCONF_CONNECTION_LOSS",
+            type=AlarmType.COMMUNICATIONS,
+            default_severity=AlarmSeverity.CRITICAL,
+        ),
+        AlarmDefinition(
+            alarm_id=1004,
+            name="RU_SUPERVISION_FAILURE",
             type=AlarmType.COMMUNICATIONS,
             default_severity=AlarmSeverity.CRITICAL,
         ),

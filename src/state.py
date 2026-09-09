@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 """Application state shared across tasks."""
@@ -16,6 +17,8 @@ class AppState:
         "nc_connected": False,
         "ru_nc_connected": False,
         "ws_connected": False,
+        "ru_supervised": False,  # persistent M-plane session holds a supervised RU
+        "ru_mplane_state": "DISCONNECTED",  # mplane_session.RuSessionState surface
     }  # NETCONF and Websocket status
     ru_update_queue: asyncio.Queue[str] = asyncio.Queue()  # outgoing RU NETCONF updates as XML payloads
 
