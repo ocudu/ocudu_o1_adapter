@@ -98,6 +98,13 @@ if __name__ == "__main__":
         "coexistence, 13792 for FR2",
     )
 
+    parser.add_argument(
+        "--bind_tdd_pattern",
+        action="store_true",
+        help="After uploading the TDD pattern, bind the Tx/Rx array carriers to it (configurable-tdd-pattern). "
+        "Off by default: some O-RU firmware hangs its NETCONF server on that edit and governs TDD device-side",
+    )
+
     # Carrier activation
     parser.add_argument("--activate_carriers", action="store_true", help="Whether to apply Tx/Rx carriers are active")
     parser.add_argument(
@@ -295,7 +302,8 @@ if __name__ == "__main__":
             ru_controller.set_oran_uplane_low_level_tx_links()
             ru_controller.set_oran_uplane_low_level_rx_links()
             ru_controller.set_oran_uplane_tdd_7d1s2u_slot_6_4_4()
-            ru_controller.bind_tdd_pattern_to_carriers()
+            if args.bind_tdd_pattern:
+                ru_controller.bind_tdd_pattern_to_carriers()
 
         if args.activate_carriers:
             if (

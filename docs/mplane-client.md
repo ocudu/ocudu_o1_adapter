@@ -40,7 +40,11 @@ ones):
    pattern applies only to carriers referencing it via the
    `configurable-tdd-pattern` leafref, and pattern validation happens at
    carrier activation; both are skipped when the O-RU does not advertise
-   `CONFIGURABLE-TDD-PATTERN-SUPPORTED`
+   `CONFIGURABLE-TDD-PATTERN-SUPPORTED`. On the CLI the binding is opt-in
+   (`--bind_tdd_pattern`): `--set_carriers` uploads the pattern exactly as
+   upstream did, because some O-RU firmware hangs its NETCONF server on the
+   binding edit and governs TDD device-side; the config-driven
+   `set_full_config` binds unless `tdd.carrier_binding: false`
 7. carrier activation — all carriers in a single edit-config;
    `skip_activation=True` defers this step so callers can gate it on
    synchronization (`activate_full_config()` applies it later)
