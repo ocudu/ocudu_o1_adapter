@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 -->
 
@@ -9,7 +10,7 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
   <ru-elements>
     <name>processing-element01</name>
     <transport-flow>
-      <interface-name>uc-vlan{{ config.vlan }}</interface-name>
+      <interface-name>{{ config.interface_name | default('uc-vlan' ~ config.vlan) }}</interface-name>
       <eth-flow>
         <ru-mac-address>{{ config.ru_mac_addr }}</ru-mac-address>
         <vlan-id>{{ config.vlan }}</vlan-id>

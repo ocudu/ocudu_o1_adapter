@@ -681,10 +681,10 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         processing_filter = """<processing-elements xmlns="urn:o-ran:processing-element:1.0"/>"""
         return self._get_and_print_config(processing_filter, "processing elements")
 
-    def get_ietf_interfaces(self):
-        """Get IETF interfaces configuration from the radio unit."""
+    def get_ietf_interfaces(self, strict=False):
+        """Get IETF interfaces configuration from the radio unit (strict: re-raise read failures)."""
         interfaces_filter = """<interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces"/>"""
-        return self._get_and_print_config(interfaces_filter, "IETF interfaces")
+        return self._get_and_print_config(interfaces_filter, "IETF interfaces", strict=strict)
 
     def get_ietf_hardware(self):
         """Get IETF hardware configuration from the radio unit."""

@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
   <interface>
     <name>{{ interface.base_interface | default('fronthaul1') }}</name>
     <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:ethernetCsmacd</type>
-    <l2-mtu xmlns="urn:o-ran:interfaces:1.0">9600</l2-mtu>
+    <l2-mtu xmlns="urn:o-ran:interfaces:1.0">{{ interface.l2_mtu | default(9600) }}</l2-mtu>
     <vlan-tagging xmlns="urn:o-ran:interfaces:1.0">true</vlan-tagging>
     <class-of-service xmlns="urn:o-ran:interfaces:1.0">
       <u-plane-marking>0</u-plane-marking>
