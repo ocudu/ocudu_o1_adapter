@@ -56,6 +56,15 @@ docker logs -f ocudu-sim-ru | grep -m1 "Listening on"
   --ru_netconf_username <user> --ru_netconf_password <pass> --rpc_log /tmp/ru-rpc.log
 # watch the log: "RU M-plane session: DISCONNECTED -> CONNECTING" and the alarm lines
 
+# 4b. provision-on-connect against the sim: the profile is applied on every
+#     connect cycle; the sim reports no sync state, so with --ru_sync_timeout 0
+#     the log says "provisioned but carriers left inactive" right away
+.venv/bin/python src/o1_adapter.py --profile ru --ru_supervise \
+  --ru_netconf_host localhost --ru_netconf_port 830 \
+  --ru_netconf_username <user> --ru_netconf_password <pass> \
+  --ru_provision_config <profile.yaml> --ru_sync_timeout 0 --rpc_log /tmp/ru-rpc.log
+# restart the sim while the adapter runs: the next connect cycle re-applies the profile
+
 # cleanup
 docker rm -f ocudu-sim-ru
 ```
@@ -104,6 +113,7 @@ The companion test repository's call-home integration test is gated on
 | `get-config` round-trip + `ofh_config_builder` output | yes |
 | RPC / `create-subscription` structure (supervision) | accepted, but **no behavioral backend** — resets are rejected, no notifications are emitted |
 | session lifecycle: reconnect, alive-but-rejected handling, idle keepalive, call-home | yes (rpc-error path only) |
+| provision-on-connect: profile applied each cycle, re-applied after a recycle | yes — but never LOCKED, so carriers stay INACTIVE; activation and the READY receipt need a real O-RU |
 | RU behaviour: RF on-air, supervision timeout, real FM alarms, real delay values, vendor quirks | **NO — needs a real O-RU** |
 
 So: the sim is a **schema/protocol/CM fixture**, not a behavioural radio.

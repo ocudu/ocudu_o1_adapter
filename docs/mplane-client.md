@@ -72,8 +72,14 @@ coexistence or 13792 for FR2.
 builds it from its options, library callers pass it directly:
 
 - `interface`: `ru_mac_addr`, `vlan`, optional `base_interface` (the
-  physical port the VLAN interface rides on; the template defaults it).
-- `processing`: `ru_mac_addr`, `du_mac_addr`, `vlan`.
+  physical port the VLAN interface rides on; the template defaults it),
+  optional `l2_mtu` (the port's L2 MTU written to the `o-ran-interfaces`
+  augment, 64..65535; defaults to 9600, the value the template has always
+  written — jumbo frames are optional on the O-RAN fronthaul, so the right
+  value is per deployment).
+- `processing`: `ru_mac_addr`, `du_mac_addr`, `vlan`, optional `interface_name`
+  (the VLAN interface the transport flow references; defaults to the
+  `uc-vlan<vlan>` the interface step creates).
 - `endpoint`: `iq_bitwidth`, `compression_type`, `num_prb`,
   `frame_structure`, optional `prach_frame_structure` / `prach_num_prb`;
   the eAxC layout either as `dl_port_id` / `ul_port_id` / `prach_port_id`
@@ -190,9 +196,11 @@ unaffected. Write methods return `True` when an edit was sent and `False` when
 it was skipped (role or unadvertised feature); failures raise. An
 `access-denied` rpc-error on a write the table does allow is logged as a NACM
 denial (an account/role mismatch, not an O-RU rejection) and raised like any
-other rpc-error. The adapter's `--ru_forward` path constructs its `RuConfig`
-as `sudo` and pushes the forwarded payloads through `edit_config`, which is
-not role-gated.
+other rpc-error. The adapter's resident session acts as its `--ru_role`
+(`sudo` by default; see [mplane-service.md](mplane-service.md)), while the
+`--ru_forward` path constructs its `RuConfig` as `sudo` and pushes the
+forwarded payloads through `edit_config`, which is not role-gated — which is
+why `--ru_role hybrid-odu` is refused together with `--ru_forward`.
 
 ```
 # provision as the O-DU account of a hybrid deployment
