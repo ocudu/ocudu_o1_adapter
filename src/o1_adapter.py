@@ -25,6 +25,7 @@ import threading
 from contextlib import suppress
 
 import websockets
+import yaml
 from flask import Flask, jsonify
 from ncclient import manager
 from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError, TLSError
@@ -38,6 +39,7 @@ from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES
 from ru_forwarder import RuForwarder
+from ru_provisioner import load_provision_config, RuProvisioner
 from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
 from ves import VesMessages
@@ -291,12 +293,48 @@ async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
             await asyncio.sleep(RETRY_INTERVAL)
 
 
+def load_ru_provisioning(arg_parser, args):
+    """Validate the provisioning flags and load the profile, or exit through arg_parser.error.
+
+    A malformed profile is a startup error, not something to rediscover on
+    every connect cycle; returns the validated dict, or None without
+    --ru_provision_config.
+    """
+    if not args.ru_provision_config:
+        return None
+    if not args.ru_supervise:
+        arg_parser.error("--ru_provision_config requires --ru_supervise (provisioning runs on the M-plane session)")
+    if args.ru_forward:
+        arg_parser.error("--ru_provision_config cannot be combined with --ru_forward (two writers of the O-RU config)")
+    if args.ru_sync_timeout < 0:
+        arg_parser.error("--ru_sync_timeout must be >= 0 seconds (0 reads the sync state once and never waits)")
+    if args.ru_interface_timeout < 0:
+        arg_parser.error("--ru_interface_timeout must be >= 0 seconds (0 reads the interfaces once and never waits)")
+    config = None
+    try:
+        config = load_provision_config(args.ru_provision_config, yaml.safe_load)
+    except (OSError, TypeError, ValueError, yaml.YAMLError) as err:
+        arg_parser.error(f"--ru_provision_config: {err}")
+    return config
+
+
 async def orchestrator(args, alarm_mgr):
     """Orchestrator: run NETCONF + WebSocket tasks."""
     # Create shared state
     state = AppState()
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
     mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
+    if mplane_session and args.ru_provision:
+        # registered first: the base configuration must exist before anything
+        # else that registers on the cycle seam touches the O-RU
+        provisioner = RuProvisioner(
+            args.ru_provision,
+            sync_timeout_s=args.ru_sync_timeout,
+            interface_timeout_s=args.ru_interface_timeout,
+            supervision_interval=args.ru_supervision_interval,
+            supervision_guard=args.ru_supervision_guard,
+        )
+        mplane_session.register_cycle_handler(provisioner.provision)
     pm_metrics = PmMetrics(state, args.profile)
 
     configure_app(state, args.autoheal)
@@ -462,6 +500,30 @@ if __name__ == "__main__":
         default=10,
         help="o-ran-supervision guard timer overhead in seconds",
     )
+    parser.add_argument(
+        "--ru_provision_config",
+        type=str,
+        default=None,
+        help="Full-config YAML (interface, processing, endpoint, carrier; optional tdd, activation) applied to "
+        "the RU on every connect cycle of the M-plane session",
+    )
+    parser.add_argument(
+        "--ru_sync_timeout",
+        type=int,
+        default=300,
+        help="Seconds to wait for the RU's sync-state LOCKED before leaving the carriers inactive (0 = read once)",
+    )
+    parser.add_argument(
+        "--ru_interface_timeout",
+        type=int,
+        default=300,
+        help=(
+            "Seconds to wait, as hybrid-odu, for the management plane's VLAN interface before deferring "
+            "provisioning to the next connect cycle (0 = read once)"
+        ),
+    )
+    # the validated profile dict, attached after parsing (load_ru_provisioning)
+    parser.set_defaults(ru_provision=None)
     parser.add_argument(
         "--ru_role",
         choices=ROLES,
@@ -650,6 +712,8 @@ if __name__ == "__main__":
             parser.error(
                 f"--ru_role {cmd_args.ru_role} cannot be combined with --ru_forward (the forwarder writes as sudo)"
             )
+
+    cmd_args.ru_provision = load_ru_provisioning(parser, cmd_args)
 
     logging.basicConfig(
         format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s",
