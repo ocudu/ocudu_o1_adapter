@@ -36,6 +36,7 @@ from mplane_session import du_facing_loops_enabled, MplaneSession
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from rpc_log import add_rpc_log_argument, enable_rpc_log
+from ru_config import ROLE_SUDO, ROLES
 from ru_forwarder import RuForwarder
 from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
@@ -461,6 +462,13 @@ if __name__ == "__main__":
         default=10,
         help="o-ran-supervision guard timer overhead in seconds",
     )
+    parser.add_argument(
+        "--ru_role",
+        choices=ROLES,
+        default=None,
+        help="NACM account group the M-plane session acts as (O-RAN WG4 M-plane specification, Table 6.5-1): "
+        "sudo (default) or hybrid-odu; writes the role may not perform are skipped",
+    )
     add_rpc_log_argument(parser)
 
     parser.add_argument(
@@ -634,6 +642,14 @@ if __name__ == "__main__":
             parser.error("--ru_callhome requires --ru_supervise (the call-home listener is the M-plane session's)")
         if not 1 <= cmd_args.ru_callhome_port <= 65535:
             parser.error("--ru_callhome_port must be 1..65535 (a TCP port)")
+
+    if cmd_args.ru_role is not None:
+        if not cmd_args.ru_supervise:
+            parser.error("--ru_role requires --ru_supervise (the role is the M-plane session's account group)")
+        if cmd_args.ru_role != ROLE_SUDO and cmd_args.ru_forward:
+            parser.error(
+                f"--ru_role {cmd_args.ru_role} cannot be combined with --ru_forward (the forwarder writes as sudo)"
+            )
 
     logging.basicConfig(
         format="%(asctime)s \x1b[32;20m[%(levelname)s]\x1b[0m %(message)s",

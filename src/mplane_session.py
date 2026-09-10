@@ -77,7 +77,7 @@ from ncclient import manager, NCClientError
 from ncclient.operations import rpc as rpc_ops
 from ncclient.transport import errors as transport_errors
 
-from ru_config import RuConfig
+from ru_config import ROLE_SUDO, ROLES, RuConfig
 from state import AppState
 
 # What a connect attempt can raise: ncclient's transport errors, socket errors
@@ -152,6 +152,11 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
         self.guard = getattr(args, "ru_supervision_guard", 10)
         if self.interval + self.guard <= 0:
             raise ValueError("supervision interval + guard must be a positive budget")
+        # The Table 6.5-1 account role the session's client acts as; an
+        # absent flag means sudo, the role with every write.
+        self.role = getattr(args, "ru_role", None) or ROLE_SUDO
+        if self.role not in ROLES:
+            raise ValueError(f"ru_role must be one of {ROLES}, got {self.role!r}")
         self.datastore = getattr(args, "ru_datastore", "running")
         self.callhome = getattr(args, "ru_callhome", False)
         self.callhome_port = getattr(args, "ru_callhome_port", 4334)
@@ -229,7 +234,9 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
             # that subscribed — watchdog resets must be dispatched there
             # (kicking on the command session gets rpc-error'd by the O-RU
             # and its watchdog starves until IT tears the sessions down).
-            ru_config = RuConfig(self.command_session, self.datastore, supervision_manager=self.notification_session)
+            ru_config = RuConfig(
+                self.command_session, self.datastore, role=self.role, supervision_manager=self.notification_session
+            )
             try:
                 await asyncio.to_thread(self.notification_session.create_subscription)
                 # Connected and subscribed: the connection alarm is about the
