@@ -194,13 +194,16 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
         self._notification_handlers.append(handler)
 
     def register_cycle_handler(self, handler):
-        """Register a callable(ru_config) invoked when a cycle reaches SUPERVISED.
+        """Register a callable(ru_config) run once per connect cycle.
 
-        Cycle handlers run blocking NETCONF calls in a worker thread — the
-        extension seam for consumers that must reconcile state notifications
-        alone cannot replay after a reconnect. NCClientError/OSError propagate
-        and recycle the session; any other handler exception is logged and
-        isolated.
+        Handlers run after the initial supervision-watchdog reset is answered,
+        accepted or not, and before the notification loop starts; once they
+        return the session resets the watchdog again, so the budget it then
+        waits on follows the O-RU's timer even when a handler fed it. They run
+        blocking NETCONF calls in a worker thread — the extension seam for
+        consumers that must reconcile state notifications alone cannot replay
+        after a reconnect. NCClientError/OSError propagate and recycle the
+        session; any other handler exception is logged and isolated.
         """
         self._cycle_handlers.append(handler)
 
@@ -252,6 +255,13 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
                     if accepted:
                         self._enter_supervised()
                     await asyncio.to_thread(self._run_cycle_handlers, ru_config)
+                if fed and self._cycle_handlers:
+                    # A long handler must have fed the watchdog itself (or the
+                    # O-RU would have torn the session down), and every feed
+                    # restarts the O-RU's timer from an instant this session
+                    # never saw: derive the budget from a reset of its own.
+                    fed, deadline, _ = await self._reset_watchdog(ru_config)
+                if fed:
                     await self._listen(ru_config, stop_event, deadline)
             except (NCClientError, OSError, EOFError) as err:
                 # NCClientError is deliberately broad: RPC-reply timeouts and
