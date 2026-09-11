@@ -12,8 +12,9 @@ the process lifetime, reconnects on any failure, and reports the session's
 lifecycle through the adapter's shared state, its log and its alarm registry
 (and northbound to VES through the existing alarm notifier). With
 `--ru_provision_config` it also provisions the O-RU on every (re)connect,
-activating carriers only once the O-RU reports itself synchronized, and it
-mirrors the O-RU's faults into its alarm registry. The O-RU becomes a managed
+activating carriers only once the O-RU reports itself synchronized. It mirrors
+the O-RU's faults into its alarm registry and streams the O-RU's performance
+measurements through the adapter's PM pipeline. The O-RU becomes a managed
 element rather than a one-shot edit-config target; the same client library
 remains available as a CLI ([mplane-client.md](mplane-client.md)) and through
 the `--ru_forward` path.
@@ -25,6 +26,7 @@ the `--ru_forward` path.
                         │   watchdog,          + INFO log per transition   │
                         │   state machine)──► RuProvisioner ─► RuConfig    │
                         │                 ──► RuFaultBridge ─► AlarmManager│
+                        │                 ──► RuPmBridge ────► PmMetrics   │
                         └──────────────────────────────────────────────────┘
 ```
 
@@ -109,8 +111,8 @@ is what lets a handler wait minutes for PTP lock or for an interface the
 management plane has yet to create; once they return the session resets the
 watchdog once more and derives its starvation budget from that reply, since
 every feed restarted the O-RU's timer from an instant it only scheduled.
-`--ru_provision_config` registers the provisioner on the cycle seam and the
-fault bridge (below) sits on both seams; array-carrier state-change
+`--ru_provision_config` registers the provisioner on the cycle seam; the fault
+and performance bridges (below) sit on both seams; array-carrier state-change
 notifications are logged at INFO as the activation receipt regardless.
 
 ### Call-home (`--ru_callhome`)
@@ -190,6 +192,7 @@ tdd: {pattern_upload: true, carrier_binding: true}   # optional; both default to
                               # the reply timeout is a transport failure, so the
                               # session would recycle and re-provision endlessly.
 activation: {state: ACTIVE, tolerate_reply_timeout: true}   # optional; these are the defaults
+pm: {rx_window_objects: [RX_ON_TIME, RX_EARLY, RX_LATE], rx_window_interval: 60, notification_interval: 60}   # optional; applied with --ru_pm
 ```
 
 `interface` is required even when the session acts as `hybrid-odu`:
@@ -310,13 +313,75 @@ simulator raises no faults of its own); live `alarm-notif`s can be injected
 into it with `sysrepocfg --notification` where docker reaches the container
 ([mplane-sim-testing.md](mplane-sim-testing.md)).
 
+## Performance bridge (`ru_pm_bridge.py`)
+
+Streams the O-RU's o-ran-performance-management `measurement-result-stats`
+notifications through the adapter's PM pipeline. Names follow the module's
+result tree: `ru.<group>.<measurement-object>` for a plain count reported
+for the whole O-RU (`ru.rx-window-stats.RX_ON_TIME`), and one segment per
+nesting level for everything else — a result list entry is named by its keys
+in document order (`eaxc-id`, `object-unit-id`, `bin-id`, `tx-array-carrier`
+and the other list keys of the result submodules), a result container by its
+tag, a leaf other than `count` by its tag: `ru.rx-window-stats.RX_ON_TIME.3`
+per eAxC, `ru.epe-statistics.TEMPERATURE.PA1.average`,
+`ru.transceiver-stats.RX_POWER.1.min.value`. Several units of one
+measurement object therefore stay distinct samples; non-numeric leaves,
+leaves outside the module's namespace and the `multiple-*` batches of earlier
+intervals are skipped. The samples pass through `PmMetrics`' PM-job filter,
+envelope and push queue exactly like the gNB metrics, so a PM job allowlists
+O-RU counters by name like any other metric. An entry the parser cannot name
+is skipped at DEBUG; the first notification of each connect cycle is logged
+at INFO.
+
+- **Seams.** The bridge is registered under `--ru_supervise` on the
+  notification seam and on the cycle seam (after the provisioner and the fault
+  bridge) with no flag of its own; `--ru_pm` makes the cycle step configure the
+  O-RU: it writes and activates the measurement objects (two-phase, through
+  the client) from the provision profile's optional `pm` section —
+  `rx_window_objects`, `rx_window_interval`, `notification_interval`,
+  validated at startup, the notification interval never longer than the
+  measurement interval since the batched `multiple-*` lists are not parsed —
+  or the client's default set. An O-RU lists the
+  measurement objects it supports in the module's config-false
+  `measurement-capabilitites` container (its own spelling); when it exposes
+  rx-window ones, the bridge requests only those — all of them when the
+  profile names none, else the profile's set minus the unadvertised (logged)
+  — so the edit is not rejected first; the other advertised groups are logged.
+  An O-RU exposing no capabilities gets the configured set: the client drops
+  the objects it rejects and retries with the rest, and the bridge requests
+  the set it converged on from the next cycle on, so the rejections happen
+  once per process.
+- **Gate and failures.** `configure` runs only when the O-RU's yang-library
+  advertises o-ran-performance-management (an O-RU's `<hello>` need not list
+  it). That read is strict: a transport failure or reply timeout recycles the
+  session like any cycle handler, an rpc-error is logged. An rpc-error on the
+  measurement edit is logged and the session lives — performance measurement
+  is optional surface and must not render an O-RU permanently unsupervised.
+  Under `--ru_role hybrid-odu` the client skips the write with one log line
+  (Table 6.5-1 gives that role read access only); the stream is consumed
+  regardless. `--ru_pm` requires `--ru_supervise` and refuses `--ru_forward`
+  (two writers of the O-RU's performance configuration).
+- **Threads.** The session runs its notification handlers on a worker thread
+  while the push queue belongs to the event loop; the samples are handed to
+  the loop, so a burst of measurements cannot corrupt the queue or wake its
+  consumer unsafely.
+
+**Northbound.** PM jobs come from the SMO through the DU-facing NETCONF config
+(`PerfMetricJob`: administrative state, stream target, metric allowlist), and
+each envelope is POSTed to the job's stream target by the existing pusher.
+The envelope carries the job's identity — `nfType` is the adapter's profile,
+`nfInstanceId` and `measuredObject` the DU function the job belongs to — so
+the collector tells O-RU samples apart by their `ru.` prefix only. Without a
+job — always the case under `--profile ru`, which runs no DU-facing loop —
+the stream is parsed and logged but nothing is pushed.
+
 ## Running it
 
 ```
 python3 src/o1_adapter.py --profile ru --ru_supervise \
     --ru_netconf_host <ru> --ru_netconf_port 830 \
     --ru_netconf_username <user> --ru_netconf_password <pass> \
-    [--ru_provision_config ru.yaml --ru_sync_timeout 300 --ru_interface_timeout 300] [--ru_role hybrid-odu] \
+    [--ru_provision_config ru.yaml --ru_sync_timeout 300 --ru_interface_timeout 300] [--ru_role hybrid-odu] [--ru_pm] \
     [--ru_callhome --ru_callhome_bind 0.0.0.0 --ru_callhome_port 4334] \
     [--ru_supervision_interval 60 --ru_supervision_guard 10] [--rpc_log FILE]
 ```
@@ -339,6 +404,7 @@ runs alongside those loops.
 | `--ru_sync_timeout` | 300 | seconds to wait for sync-state LOCKED before leaving the carriers inactive (0 = read once) |
 | `--ru_interface_timeout` | 300 | seconds to wait, as `hybrid-odu`, for the management plane's VLAN interface before deferring provisioning to the next connect cycle (0 = read once) |
 | `--ru_role` | sudo | account role the session's client acts as (`sudo` or `hybrid-odu`, Table 6.5-1); requires `--ru_supervise`; `hybrid-odu` is refused with `--ru_forward`, whose writes are `sudo` |
+| `--ru_pm` | off | configure and activate the O-RU's measurement objects on every connect cycle (requires `--ru_supervise`; the results stream regardless) |
 | `--ru_datastore` | running | O-RU datastore |
 | `--rpc_log` | off | append the raw NETCONF conversation (every rpc, rpc-reply and notification) to a file |
 
@@ -349,8 +415,12 @@ runs alongside those loops.
   the next connect cycle — an O-RU leaving FAULTY after a critical fault
   typically resets, which lands in the reconnect-and-reprovision path — not by
   watching alarm clears.
-- **Performance bridging**: o-ran-performance-management notifications reach
-  the notification-handler seam but nothing consumes them yet.
+- **Performance pushing without a job**: O-RU samples go northbound only to PM
+  jobs the SMO configured through the DU-facing NETCONF config; under
+  `--profile ru` there is no such config, so the stream is parsed and logged,
+  not pushed. Only rx-window measurement objects are ever configured — the
+  other groups an O-RU may advertise in `measurement-capabilitites` are parsed
+  when streamed, never written; file upload stays disabled.
 - **Cell-driven carrier state**: the DU cell's administrative state does not
   yet drive the O-RU carriers through this session; that is later work that
   needs the session under a DU-facing profile.
@@ -400,5 +470,11 @@ The fault bridge is covered by unit tests over a real alarm manager
 (raise/clear, reconcile including a refused and a failed read, multi-source
 faults, WARNING retirement, a failing notifier), a scripted-session wiring test, the empty-list read against the
 simulator, and injected `alarm-notif` round trips where docker reaches the
-simulator.
+simulator. The performance bridge is covered by parser and pipeline unit tests
+over a real `PmMetrics` (naming, job allowlist, the yang-library gate, the
+role skip, rejected versus failed writes, the thread hand-off), a
+scripted-session dispatch test and a configure round trip against the
+simulator; the simulator cannot emit `measurement-result-stats` (their
+leafrefs validate against operational data nothing populates), so the live
+stream is proven on an O-RU.
 See [mplane-sim-testing.md](mplane-sim-testing.md).

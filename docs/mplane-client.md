@@ -21,7 +21,7 @@ published O-RAN WG4 models and 3GPP tables.
 | Delay management | o-ran-delay-management | read + DU-side timing derivation |
 | Capability discovery | o-ran-module-cap, ietf-yang-library | read (RFC 8525 with RFC 7895 modules-state fallback) |
 | Supervision | o-ran-supervision | watchdog reset RPC + notification-driven supervise loop |
-| Performance management | o-ran-performance-management | measurement-object configuration (two-phase) |
+| Performance management | o-ran-performance-management | measurement-object configuration (two-phase, `configure_perf_measurement`, CLI `--set_pm`); the adapter's resident session streams the `measurement-result-stats` results ([mplane-service.md](mplane-service.md)) |
 | Synchronization | o-ran-sync | status read, sync-LOCKED wait; ptp-config write where the O-RU permits it |
 | Fault management | o-ran-fm | active-alarm-list read (`get_active_alarms(strict=)`, CLI `--get_alarms`) and alarm-notif parsing (`fm_parsers`); the adapter's resident session consumes them |
 | Not implemented | software/file management, user management, certificates, trace/troubleshooting, ALD, beamforming | out of scope — use vendor tooling or the O-RU's own procedures |

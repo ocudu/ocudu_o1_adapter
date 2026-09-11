@@ -157,5 +157,10 @@ sim (it is empty — the sim raises no faults), the bridge's raise/clear and
 reconcile paths run over a real alarm manager without a server, and full
 `alarm-notif` round trips inject with `docker exec <sim> sysrepocfg
 --notification --format=xml` where docker reaches the container (the
-companion tests gate on `MOCK_RU_CONTAINER`). Performance handling is not
-exercised yet.
+companion tests gate on `MOCK_RU_CONTAINER`). Performance handling: the
+measurement configuration round-trips against the sim (it implements the
+module), the parser and the PM-job pipeline run over a real `PmMetrics`
+without a server, and a scripted session dispatches a `measurement-result-stats`
+into the bridge; the sim cannot emit that notification itself (its leafrefs
+validate against operational data nothing populates), so the live stream is
+proven on an O-RU.
