@@ -57,4 +57,6 @@ class AlarmDefinitions:
             type=AlarmType.EQUIPMENT,
             default_severity=AlarmSeverity.WARNING,
         ),
+        # Alarm IDs 4000-69535 reserved for O-RU reported faults, registered
+        # dynamically by ru_fm_bridge (4000 + the o-ran-fm fault-id, a uint16)
     ]

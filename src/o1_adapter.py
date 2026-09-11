@@ -38,6 +38,7 @@ from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES
+from ru_fm_bridge import RuFaultBridge
 from ru_forwarder import RuForwarder
 from ru_provisioner import load_provision_config, RuProvisioner
 from ssh_algorithms import restrict_ssh_algorithms
@@ -324,15 +325,21 @@ async def orchestrator(args, alarm_mgr):
     state = AppState()
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
     mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
-    if mplane_session and args.ru_provision:
-        # registered first: the base configuration must exist before anything
-        # else that registers on the cycle seam touches the O-RU
-        provisioner = RuProvisioner(
-            args.ru_provision,
-            sync_timeout_s=args.ru_sync_timeout,
-            interface_timeout_s=args.ru_interface_timeout,
-        )
-        mplane_session.register_cycle_handler(provisioner.provision)
+    if mplane_session:
+        if args.ru_provision:
+            # registered first: the base configuration must exist before anything
+            # else that registers on the cycle seam touches the O-RU
+            provisioner = RuProvisioner(
+                args.ru_provision,
+                sync_timeout_s=args.ru_sync_timeout,
+                interface_timeout_s=args.ru_interface_timeout,
+            )
+            mplane_session.register_cycle_handler(provisioner.provision)
+        # after the provisioner on the cycle seam: reconcile reads the
+        # active-alarm-list of a configured O-RU
+        ru_fault_bridge = RuFaultBridge(alarm_mgr)
+        mplane_session.register_notification_handler(ru_fault_bridge.handle_notification)
+        mplane_session.register_cycle_handler(ru_fault_bridge.reconcile)
     pm_metrics = PmMetrics(state, args.profile)
 
     configure_app(state, args.autoheal)
