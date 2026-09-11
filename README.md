@@ -109,9 +109,10 @@ The adapter includes an Mplane client for O-RAN WG4 O-RUs, in two layers:
   process lifetime, optional call-home (`--ru_callhome`, RFC 8071),
   provision-on-connect from a YAML profile (`--ru_provision_config`, with
   carrier activation gated on the O-RU reporting sync LOCKED), the account
-  role the session acts as (`--ru_role`), and the session lifecycle surfaced
-  in the shared state, the log and alarms 1003/1004. `--profile ru` runs it
-  without the DU-facing loops. See
+  role the session acts as (`--ru_role`), the O-RU's o-ran-fm faults mirrored
+  into the alarm registry and VES (alarm ids 4000 + fault-id), and the session
+  lifecycle surfaced in the shared state, the log and alarms 1003/1004.
+  `--profile ru` runs it without the DU-facing loops. See
   [docs/mplane-service.md](docs/mplane-service.md).
 
 Development and testing against a simulated O-RU is described in

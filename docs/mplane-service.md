@@ -12,10 +12,11 @@ the process lifetime, reconnects on any failure, and reports the session's
 lifecycle through the adapter's shared state, its log and its alarm registry
 (and northbound to VES through the existing alarm notifier). With
 `--ru_provision_config` it also provisions the O-RU on every (re)connect,
-activating carriers only once the O-RU reports itself synchronized. The O-RU
-becomes a managed element rather than a one-shot edit-config target; the same
-client library remains available as a CLI ([mplane-client.md](mplane-client.md))
-and through the `--ru_forward` path.
+activating carriers only once the O-RU reports itself synchronized, and it
+mirrors the O-RU's faults into its alarm registry. The O-RU becomes a managed
+element rather than a one-shot edit-config target; the same client library
+remains available as a CLI ([mplane-client.md](mplane-client.md)) and through
+the `--ru_forward` path.
 
 ```
                         ┌─────────────────── o1_adapter ───────────────────┐
@@ -23,6 +24,7 @@ and through the `--ru_forward` path.
   (server)              │  (2 sessions,   ──► AppState.session_state       │
                         │   watchdog,          + INFO log per transition   │
                         │   state machine)──► RuProvisioner ─► RuConfig    │
+                        │                 ──► RuFaultBridge ─► AlarmManager│
                         └──────────────────────────────────────────────────┘
 ```
 
@@ -106,10 +108,10 @@ so nothing interleaves with the handlers' RPCs on the command session — which
 is what lets a handler wait minutes for PTP lock or for an interface the
 management plane has yet to create; once they return the session resets the
 watchdog once more and derives its starvation budget from that reply, since
-every feed restarted the O-RU's timer from an instant it only scheduled. `--ru_provision_config` registers the
-provisioner on the cycle seam (below); nothing consumes the notification seam
-yet, and array-carrier state-change notifications are logged at INFO as the
-activation receipt regardless.
+every feed restarted the O-RU's timer from an instant it only scheduled.
+`--ru_provision_config` registers the provisioner on the cycle seam and the
+fault bridge (below) sits on both seams; array-carrier state-change
+notifications are logged at INFO as the activation receipt regardless.
 
 ### Call-home (`--ru_callhome`)
 
@@ -234,6 +236,80 @@ cycle handler. An O-RU that refuses activation while it considers the session
 unsupervised (one that rejected the initial watchdog reset, for instance) is
 therefore provisioned but inactive until the next connect cycle.
 
+## Fault bridge (`ru_fm_bridge.py`)
+
+Mirrors o-ran-fm faults into the alarm registry: adapter alarm id =
+**4000 + fault-id** (o-ran-fm's fault-id is a uint16, so 4000-69535 is
+reserved; definitions are registered dynamically — the fault space is
+O-RU-defined), the o-ran-fm severity literal mapped by name onto the adapter's
+severities (anything else becomes INDETERMINATE), the type from the O-RU's
+`alarm-type` (o-ran-fm 2024-08-12; EQUIPMENT when it reports none). It is
+registered under `--ru_supervise` with no flag of its own: on the notification
+seam for live `alarm-notif`s, and on the cycle seam after the provisioner for
+reconciliation.
+
+- Identity per o-ran-fm is **(fault-id, fault-source)**. One adapter alarm
+  mirrors a fault-id: it carries the most severe of its sources' severities,
+  names the sources in its message, stays active while any source reports
+  the fault and retires when the last one clears. A clear for a fault the
+  bridge never mirrored cannot be attributed and is left to reconciliation.
+- **Reconciliation** on every connect cycle syncs against the O-RU's
+  active-alarm-list, so faults raised or cleared while the session was down
+  are neither lost nor leaked. Each listed fault-id is applied once,
+  aggregated over its sources, so an unchanged list emits nothing northbound.
+  Staleness is judged against the alarm manager's active state — the record
+  of what went northbound — so a recreated bridge starts consistent. The read
+  is strict: a transport failure or reply timeout recycles the session and an
+  rpc-error (the O-RU refusing the read) keeps the mirror as it is until the
+  next cycle; neither is taken for "no alarms", which would clear every
+  mirrored fault. Northbound delivery is synchronous; a notifier failure on
+  one update does not stop the rest of the sweep, and the session keeps the
+  watchdog fed meanwhile.
+- The bridge's bookkeeping mutates before each manager call, so a notifier
+  that raises cannot leave bridge and registry disagreeing; the event itself
+  is the notifier's to deliver (the VES notifier logs and swallows delivery
+  failures).
+- Per o-ran-fm, WARNING faults never receive a clear notification; a WARNING
+  is retired only by reconciliation, i.e. at the next connect cycle — on a
+  healthy session that can be a long time.
+- Nothing acts on a mirrored fault; a carrier the O-RU deactivates is
+  re-activated only on the next connect cycle (see below).
+
+**Northbound mapping.** The mirrored fault leaves through the adapter's
+notifier, `ves.send_alarm_event`, as a 3GPP TS 28.532 `notifyNewAlarm` /
+`notifyClearedAlarm` carried in a VES stndDefined event under the DU's
+identity (`sourceName`, `eventId`, `nodeId`): the O-RU is a component of this
+managed element, and a managed element per O-RU would be a topology decision
+above the adapter. What the O-RU reported travels in the notification's own
+fields (the bridge attaches the o-ran-fm leaves to each registry update as
+`details`; `alarm_manager` carries them on the event):
+
+| o-ran-fm | VES `stndDefinedFields.data` |
+|---|---|
+| fault-id | `alarmId` = 4000 + fault-id; `additionalInformation.fault-id` |
+| fault-source (every source reporting the fault-id) | `additionalInformation.fault-source` |
+| affected-objects | `additionalInformation.affected-objects` |
+| fault-severity | `perceivedSeverity` (`CLEARED` on a clear) |
+| is-cleared | `notificationType`: `notifyNewAlarm` / `notifyClearedAlarm` |
+| fault-text | `specificProblem`; `additionalText` carries it with the sources |
+| event-time | `eventTime` (the O-RU's timestamp; the adapter's send time when absent) |
+| alarm-type | `alarmType` (the O-RU's, one of the ten X.733 types; `EQUIPMENT_ALARM` when it reports none) |
+| probable-cause | `probableCause` (the O-RU's; `RU_FAULT_<fault-id>` when it reports none) |
+| specific-problem | `specificProblem` (the O-RU's; its fault-text when it reports none) |
+| proposed-repair-actions | `proposedRepairActions` (the O-RU's; omitted when it reports none) |
+| additional-information | `additionalInformation`: each identifier/information pair, next to the leaf-name keys above |
+| — | `trendIndication` from the registry; `notificationId` = the notifier's per-event sequence |
+
+The DU's own alarms go through the same path and gain the TS 28.532
+`alarmType` literals, the clear notification type, the per-event
+`notificationId` and the ISO 8601 `eventTime`; no canned
+`proposedRepairActions` is rendered for them any more.
+
+Against the simulated O-RU the bridge reads an empty active-alarm-list (the
+simulator raises no faults of its own); live `alarm-notif`s can be injected
+into it with `sysrepocfg --notification` where docker reaches the container
+([mplane-sim-testing.md](mplane-sim-testing.md)).
+
 ## Running it
 
 ```
@@ -273,9 +349,11 @@ runs alongside those loops.
   the next connect cycle — an O-RU leaving FAULTY after a critical fault
   typically resets, which lands in the reconnect-and-reprovision path — not by
   watching alarm clears.
-- **Fault and performance bridging**: o-ran-fm and
-  o-ran-performance-management notifications reach the notification-handler
-  seam but nothing consumes them yet.
+- **Performance bridging**: o-ran-performance-management notifications reach
+  the notification-handler seam but nothing consumes them yet.
+- **Cell-driven carrier state**: the DU cell's administrative state does not
+  yet drive the O-RU carriers through this session; that is later work that
+  needs the session under a DU-facing profile.
 - **`--ru_forward` unification**: the DU→RU config forwarder keeps its own
   session and writes as `sudo`; it and `--ru_provision_config` are alternative
   ways to source the O-RU's configuration and are refused together. Only the
@@ -318,4 +396,9 @@ the same two ways: scripted fakes for the sync gating and rpc-error handling, an
 reports sync LOCKED, so the suite proves provisioned-but-inactive, and a leaf
 perturbed between cycles is restored after a forced recycle, the proof that a
 reconnect genuinely re-provisions. The LOCKED and READY paths need an O-RU.
+The fault bridge is covered by unit tests over a real alarm manager
+(raise/clear, reconcile including a refused and a failed read, multi-source
+faults, WARNING retirement, a failing notifier), a scripted-session wiring test, the empty-list read against the
+simulator, and injected `alarm-notif` round trips where docker reaches the
+simulator.
 See [mplane-sim-testing.md](mplane-sim-testing.md).

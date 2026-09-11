@@ -152,5 +152,10 @@ supervision RPC encoding (`reset_supervision_watchdog` against the sim raises
 the rpc-error, a malformed variant is rejected by schema validation);
 `MplaneSession` state transitions and alarm bookkeeping with scripted
 sessions; **regression: generated config matches a golden generated config**.
-Fault and performance handling on the session are not exercised yet — the
-handler seams exist, nothing consumes them.
+Fault handling on the session: the active-alarm-list read runs against the
+sim (it is empty — the sim raises no faults), the bridge's raise/clear and
+reconcile paths run over a real alarm manager without a server, and full
+`alarm-notif` round trips inject with `docker exec <sim> sysrepocfg
+--notification --format=xml` where docker reaches the container (the
+companion tests gate on `MOCK_RU_CONTAINER`). Performance handling is not
+exercised yet.
