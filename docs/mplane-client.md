@@ -23,7 +23,8 @@ published O-RAN WG4 models and 3GPP tables.
 | Supervision | o-ran-supervision | watchdog reset RPC + notification-driven supervise loop |
 | Performance management | o-ran-performance-management | measurement-object configuration (two-phase) |
 | Synchronization | o-ran-sync | status read, sync-LOCKED wait; ptp-config write where the O-RU permits it |
-| Not implemented | fault management, software/file management, user management, certificates, trace/troubleshooting, ALD, beamforming | out of scope — use vendor tooling or the O-RU's own procedures |
+| Fault management | o-ran-fm | active-alarm-list read (`get_active_alarms(strict=)`, CLI `--get_alarms`) and alarm-notif parsing (`fm_parsers`); the adapter's resident session consumes them |
+| Not implemented | software/file management, user management, certificates, trace/troubleshooting, ALD, beamforming | out of scope — use vendor tooling or the O-RU's own procedures |
 
 ## Provisioning
 
@@ -170,6 +171,17 @@ the reason Mplane exists:
   report-all is requested, and ncclient refuses to send a mode the server
   did not list.
 
+## Fault management
+
+- `get_active_alarms(strict=)`: the O-RU's o-ran-fm active-alarm-list as
+  plain dicts (`fault_id`, `fault_source`, `fault_severity`, `is_cleared`,
+  `fault_text`, `event_time`, `affected_objects`); `strict=True` re-raises a
+  failed read, as `get_sync_status` does, so a reconciling caller can tell
+  "no alarms" from "could not read". `fm_parsers.parse_alarm_notification()`
+  maps a live `alarm-notif` to the same dict. The client only reads; the
+  adapter's resident session is what mirrors faults northbound
+  ([mplane-service.md](mplane-service.md)).
+
 ## Roles
 
 The client acts as one of two NACM account groups from the O-RAN WG4 M-plane
@@ -223,9 +235,10 @@ why `--ru_role hybrid-odu` is refused together with `--ru_forward`.
 ./ru_controller.py --host <ru> ... --activate_carriers --carrier_state ACTIVE \
     --wait-sync-locked 300 --wait-carriers-ready 60
 
-# keep the supervision session alive / configure PM
+# keep the supervision session alive / configure PM / list the active alarms
 ./ru_controller.py --host <ru> ... --supervise
 ./ru_controller.py --host <ru> ... --set_pm
+./ru_controller.py --host <ru> ... --get_alarms
 ```
 
 `--callhome` accepts an O-RU-initiated NETCONF call-home connection

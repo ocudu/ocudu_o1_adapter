@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import errno
+import json
 import logging
 import sys
 import time
@@ -107,6 +108,9 @@ if __name__ == "__main__":
         "writes the role may not perform are skipped",
     )
     parser.add_argument("--get_config", action="store_true", help="Get current RU config")
+    parser.add_argument(
+        "--get_alarms", action="store_true", help="Get the RU's active o-ran-fm alarms, one JSON line per alarm"
+    )
     parser.add_argument(
         "--prach_endpoint_names",
         type=str,
@@ -306,6 +310,10 @@ if __name__ == "__main__":
                 },
                 endpoint_config=endpoint_config,
             )
+
+        if args.get_alarms:
+            for active_alarm in ru_controller.get_active_alarms(strict=True):
+                print(json.dumps(active_alarm))
 
         if args.set_pm:
             ru_controller.configure_perf_measurement()

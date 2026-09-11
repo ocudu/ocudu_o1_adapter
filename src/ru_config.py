@@ -24,6 +24,7 @@ from ncclient.operations.errors import OperationError, TimeoutExpiredError
 from ncclient.transport import errors as transport_errors
 from ncclient.xml_ import to_ele
 
+from fm_parsers import parse_active_alarms
 from ofh_config_builder import (
     active_carrier_numerology,
     build_ofh_config,
@@ -116,6 +117,7 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
             "urn:o-ran:module-cap:1.0": None,
             "urn:ietf:params:xml:ns:yang:ietf-yang-library": None,
             "urn:o-ran:performance-management:1.0": None,
+            "urn:o-ran:fm:1.0": None,
         }
 
     def can_write(self, module) -> bool:
@@ -741,6 +743,13 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         """
         return self.get_module_capabilities_map().get(module_name, {}).get("features", set())
 
+    def get_active_alarms(self, strict=False):
+        """The O-RU's active alarms (o-ran-fm, config false) as parsed dicts; strict re-raises read failures."""
+        fm_filter = """<active-alarm-list xmlns="urn:o-ran:fm:1.0"/>"""
+        return parse_active_alarms(
+            self._get_and_print_config(fm_filter, "ORAN active alarms", operational=True, strict=strict)
+        )
+
     _PTP_PROFILES = ("G_8275_1", "G_8275_2")
 
     def set_oran_sync_config(self, accepted_clock_classes=None, domain_number=None, ptp_profile=None, gnss_enable=None):
@@ -900,8 +909,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         <get-config>; required for config-false data such as ru-delay-profile.
         Retrieval failures — transport errors, ncclient OperationErrors
         (rpc-error, request validation such as with-defaults) and the reply
-        timeout — degrade to {} unless strict=True re-raises them. A dry run
-        has no session and returns {}.
+        timeout, unparsable reply — degrade to {} unless strict=True raises
+        them. A dry run has no session and returns {}.
         """
         if self.dry_run:
             logging.debug("Dry run: not reading %s", description)
@@ -933,6 +942,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         try:
             parsed = xmltodict.parse(xml_payload, process_namespaces=True, namespaces=self._namespaces)
         except (ValueError, ExpatError) as err:  # pragma: no cover - parsing failure
+            if strict:
+                raise OperationError(f"unparsable {description} reply") from err
             logging.debug("Unable to parse %s payload: %s", description, err)
             return {}
         return parsed.get("rpc-reply", {}).get("data", {})
