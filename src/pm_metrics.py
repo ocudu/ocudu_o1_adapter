@@ -5,15 +5,16 @@
 """
 PM (performance management) metrics processing for the O1 adapter.
 
-Handles gNB WS metric payloads: flattening, KPI rewriting per TS 28.554,
-filtering per PM job, and pushing envelopes to configured stream targets.
+Handles gNB WS metric payloads (flattening, KPI rewriting per TS 28.554) and
+O-RU samples from the M-plane performance bridge, filtering both per PM job
+and pushing envelopes to the configured stream targets.
 """
 
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import aiohttp
 
@@ -149,11 +150,24 @@ def _flatten_metrics(data: dict) -> list:
 
 
 class PmMetrics:
-    """Processes gNB WS metric payloads and pushes PM envelopes to stream targets."""
+    """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets."""
 
     def __init__(self, state: AppState, profile: str = "gnb"):
         self._state = state
         self._profile = profile
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # bound by run_pusher
+
+    def bind_loop(self) -> None:
+        """Bind the running event loop: O-RU samples from other threads are handed to it."""
+        self._loop = asyncio.get_running_loop()
+
+    def _active_jobs(self) -> dict:
+        """PM jobs that are UNLOCKED and have a stream target."""
+        return {
+            job_id: job
+            for job_id, job in self._state.pm_jobs.items()
+            if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
+        }
 
     async def handle_ws_message(self, msg: str) -> None:
         """Dispatch WS messages by component type, and stream PM envelopes when configured."""
@@ -173,18 +187,41 @@ class PmMetrics:
                 logging.debug("WS %s metrics: %s", key, block)
         # TODO: check for AMF connection status
 
-        active_jobs = {
-            job_id: job
-            for job_id, job in self._state.pm_jobs.items()
-            if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
-        }
+        active_jobs = self._active_jobs()
         if not active_jobs:
             return
+        self._stream_metrics(_flatten_metrics(data), active_jobs)
 
-        metrics = _flatten_metrics(data)
+    def handle_ru_metrics(self, metrics: list) -> None:
+        """Stream O-RU metric samples through the PM-job filter and push queue.
+
+        Samples share the WS metrics' {"name", "value"} shape (the O-RU bridge
+        prefixes names with "ru."), so PM jobs allowlist them like any other
+        metric. The M-plane session runs its notification handlers on a
+        worker thread while the push queue belongs to the event loop, so the
+        samples are handed to the loop run_pusher bound; before a loop is
+        bound (no pusher running) they are streamed inline, where nothing
+        consumes the queue concurrently.
+        """
         if not metrics:
             return
+        if self._loop is None or self._loop.is_closed():
+            self._stream_ru_metrics(metrics)
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._stream_ru_metrics, metrics)
+        except RuntimeError:  # the loop closed underneath us: shutting down, the samples are moot
+            logging.debug("Dropping %d O-RU samples: event loop closed", len(metrics))
 
+    def _stream_ru_metrics(self, metrics: list) -> None:
+        active_jobs = self._active_jobs()
+        if active_jobs:
+            self._stream_metrics(metrics, active_jobs)
+
+    def _stream_metrics(self, metrics: list, active_jobs: dict) -> None:
+        """Filter metrics per active PM job and enqueue one envelope per job."""
+        if not metrics:
+            return
         for job_id, job in active_jobs.items():
             allowed = set(job.get("performanceMetrics") or [])
             job_metrics = [m for m in metrics if m.get("name") in allowed] if allowed else metrics
@@ -211,6 +248,7 @@ class PmMetrics:
 
     async def run_pusher(self) -> None:
         """Consume pm_metrics_queue and POST each envelope to its configured streamTarget."""
+        self.bind_loop()
         async with aiohttp.ClientSession() as session:
             while True:
                 target, envelope = await self._state.pm_metrics_queue.get()
