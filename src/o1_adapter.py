@@ -40,6 +40,7 @@ from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES
 from ru_fm_bridge import RuFaultBridge
 from ru_forwarder import RuForwarder
+from ru_pm_bridge import RuPmBridge
 from ru_provisioner import load_provision_config, RuProvisioner
 from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
@@ -325,6 +326,7 @@ async def orchestrator(args, alarm_mgr):
     state = AppState()
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
     mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
+    pm_metrics = PmMetrics(state, args.profile)
     if mplane_session:
         if args.ru_provision:
             # registered first: the base configuration must exist before anything
@@ -340,7 +342,16 @@ async def orchestrator(args, alarm_mgr):
         ru_fault_bridge = RuFaultBridge(alarm_mgr)
         mplane_session.register_notification_handler(ru_fault_bridge.handle_notification)
         mplane_session.register_cycle_handler(ru_fault_bridge.reconcile)
-    pm_metrics = PmMetrics(state, args.profile)
+        # measurement-result-stats stream whenever the O-RU sends them; --ru_pm
+        # also writes the measurement objects on the cycle seam, after the
+        # provisioner, from the profile's optional `pm` section (the adapter's
+        # default set when absent)
+        pm_config = (args.ru_provision or {}).get("pm")
+        if pm_config and not args.ru_pm:
+            logging.info("The provision profile's pm section is not applied without --ru_pm")
+        ru_pm_bridge = RuPmBridge(pm_metrics, pm_config=pm_config, configure=args.ru_pm)
+        mplane_session.register_notification_handler(ru_pm_bridge.handle_notification)
+        mplane_session.register_cycle_handler(ru_pm_bridge.on_cycle)
 
     configure_app(state, args.autoheal)
 
@@ -509,7 +520,7 @@ if __name__ == "__main__":
         "--ru_provision_config",
         type=str,
         default=None,
-        help="Full-config YAML (interface, processing, endpoint, carrier; optional tdd, activation) applied to "
+        help="Full-config YAML (interface, processing, endpoint, carrier; optional tdd, activation, pm) applied to "
         "the RU on every connect cycle of the M-plane session",
     )
     parser.add_argument(
@@ -535,6 +546,12 @@ if __name__ == "__main__":
         default=None,
         help="NACM account group the M-plane session acts as (O-RAN WG4 M-plane specification, Table 6.5-1): "
         "sudo (default) or hybrid-odu; writes the role may not perform are skipped",
+    )
+    parser.add_argument(
+        "--ru_pm",
+        action="store_true",
+        help="configure and activate the O-RU's o-ran-performance-management measurement objects on every "
+        "connect cycle (requires --ru_supervise; measurement-result-stats are streamed regardless)",
     )
     add_rpc_log_argument(parser)
 
@@ -717,6 +734,11 @@ if __name__ == "__main__":
             parser.error(
                 f"--ru_role {cmd_args.ru_role} cannot be combined with --ru_forward (the forwarder writes as sudo)"
             )
+
+    if cmd_args.ru_pm and not cmd_args.ru_supervise:
+        parser.error("--ru_pm requires --ru_supervise (the measurement objects are written on the M-plane session)")
+    if cmd_args.ru_pm and cmd_args.ru_forward:
+        parser.error("--ru_pm cannot be combined with --ru_forward (two writers of the O-RU performance configuration)")
 
     cmd_args.ru_provision = load_ru_provisioning(parser, cmd_args)
 

@@ -50,6 +50,7 @@ alarm clears.
 """
 
 import logging
+import re
 import time
 
 from ncclient.operations import rpc as rpc_ops
@@ -290,6 +291,40 @@ def _check_sections(config, path):
     pm = config.get("pm")
     if pm is not None and not isinstance(pm, dict):
         raise ValueError(f"provision config {path}: pm must be a mapping when present")
+    _check_pm(pm or {}, path)
+
+
+_PM_KEYS = ("rx_window_objects", "rx_window_interval", "notification_interval")
+_PM_OBJECT = re.compile(r"[A-Z0-9_]+")
+
+
+def _check_pm(pm, path):
+    """The optional pm section: known keys, measurement-object names, positive intervals,
+    notification interval not longer than the measurement interval."""
+    unknown = sorted(set(pm) - set(_PM_KEYS))
+    if unknown:
+        raise ValueError(f"provision config {path}: pm has unknown keys {unknown}; known: {list(_PM_KEYS)}")
+    objects = pm.get("rx_window_objects")
+    if objects is not None and (
+        not isinstance(objects, list)
+        or not objects
+        or not all(isinstance(name, str) and _PM_OBJECT.fullmatch(name) for name in objects)
+    ):
+        raise ValueError(f"provision config {path}: pm.rx_window_objects must be a non-empty list of object names")
+    for key in _PM_KEYS[1:]:
+        value = pm.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            raise ValueError(f"provision config {path}: pm.{key} must be a positive integer, not {value!r}")
+    # A notification interval longer than the measurement interval makes the
+    # O-RU batch the earlier intervals into the multiple-* lists, which the
+    # bridge does not parse; the client defaults (60/60) stand in for omitted keys.
+    rx_window = pm.get("rx_window_interval", 60)
+    notification = pm.get("notification_interval", 60)
+    if notification > rx_window:
+        raise ValueError(
+            f"provision config {path}: pm.notification_interval ({notification}) must not exceed "
+            f"pm.rx_window_interval ({rx_window}); batched earlier intervals would be dropped"
+        )
 
 
 def _normalize_declarations(config, path):

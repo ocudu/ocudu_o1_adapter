@@ -548,10 +548,12 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         logging.warning("O-RU rejected every configured PM measurement object; PM inactive (rejected %s)", dropped)
         return []
 
-    def get_perf_measurement_config(self):
-        """Get the RU's performance-measurement configuration ({} when unset)."""
+    def get_perf_measurement_config(self, operational=False):
+        """The RU's performance-measurement config ({} when unset); operational includes the state data."""
         pm_filter = """<performance-measurement-objects xmlns="urn:o-ran:performance-management:1.0"/>"""
-        return self._get_and_print_config(pm_filter, "ORAN Performance measurement config") or {}
+        return (
+            self._get_and_print_config(pm_filter, "ORAN Performance measurement config", operational=operational) or {}
+        )
 
     def set_oran_uplane_carrier_active(self, active_config):
         """Set ORAN U-plane carrier activation (nof_tx_carriers/nof_rx_carriers, default 4)."""
@@ -716,23 +718,26 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         cap_filter = """<module-capability xmlns="urn:o-ran:module-cap:1.0"/>"""
         return self._get_and_print_config(cap_filter, "ORAN module capabilities", operational=True)
 
-    def get_yang_library(self):
-        """Get ietf-yang-library data from the radio unit (operational <get>)."""
+    def get_yang_library(self, strict=False):
+        """Get ietf-yang-library data from the radio unit (operational <get>); strict re-raises read failures."""
         library_filter = """<yang-library xmlns="urn:ietf:params:xml:ns:yang:ietf-yang-library"/>"""
-        return self._get_and_print_config(library_filter, "IETF yang library", operational=True)
+        return self._get_and_print_config(library_filter, "IETF yang library", operational=True, strict=strict)
 
-    def get_module_capabilities_map(self):
+    def get_module_capabilities_map(self, strict=False):
         """Modules the O-RU advertises via ietf-yang-library, with features.
 
         Falls back to the deprecated RFC 7895 modules-state layout for O-RUs
         that do not expose the RFC 8525 yang-library tree. Returns {} when
-        the RU exposes no yang-library data at all.
+        the RU exposes no yang-library data at all; strict re-raises read
+        failures instead of reading them as no data.
         """
-        capabilities = parse_module_capabilities((self.get_yang_library() or {}).get("yang-library") or {})
+        capabilities = parse_module_capabilities((self.get_yang_library(strict) or {}).get("yang-library") or {})
         if not capabilities:
             state_filter = """<modules-state xmlns="urn:ietf:params:xml:ns:yang:ietf-yang-library"/>"""
-            data = self._get_and_print_config(state_filter, "IETF yang library modules-state", operational=True) or {}
-            capabilities = parse_module_capabilities(data.get("modules-state") or {})
+            data = self._get_and_print_config(
+                state_filter, "yang-library modules-state", operational=True, strict=strict
+            )
+            capabilities = parse_module_capabilities((data or {}).get("modules-state") or {})
         return capabilities
 
     def get_advertised_features(self, module_name):
