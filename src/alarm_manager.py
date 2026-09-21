@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import auto, Enum
 from threading import Lock
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Mapping, Optional
 
 
 # --- ORAN/3GPP-style enumerations (minimal, extend as needed) ---
@@ -23,6 +23,11 @@ class AlarmType(Enum):
     QUALITY_OF_SERVICE = auto()
     EQUIPMENT = auto()
     SECURITY = auto()
+    # the remaining ITU-T X.733 / TS 28.532 types an O-RU may report (o-ran-fm alarm-type)
+    INTEGRITY_VIOLATION = auto()
+    OPERATIONAL_VIOLATION = auto()
+    PHYSICAL_VIOLATION = auto()
+    TIME_DOMAIN_VIOLATION = auto()
     # Add more mapping to spec categories as needed
 
 
@@ -66,6 +71,7 @@ class AlarmState:
     trend: AlarmTrend = field(default=AlarmTrend.NO_CHANGE)
     last_change_ts: Optional[datetime] = None
     last_message: Optional[str] = None  # free-form cause/extra info
+    last_details: Optional[Mapping[str, str]] = None  # key/value context the raiser attached
 
 
 # pylint: disable=too-many-instance-attributes
@@ -82,6 +88,7 @@ class AlarmEvent:
     trend: AlarmTrend
     timestamp: datetime
     message: Optional[str] = None
+    details: Optional[Mapping[str, str]] = None
 
 
 Notifier = Callable[[AlarmEvent], None]
@@ -136,16 +143,19 @@ class AlarmManager:
 
     # --- Core operations ---
 
-    def set_alarm(
+    def set_alarm(  # pylint: disable=too-many-arguments
         self,
         alarm_id: int,
         severity: Optional[AlarmSeverity] = None,
         trend: Optional[AlarmTrend] = None,
         message: Optional[str] = None,
+        *,
+        details: Optional[Mapping[str, str]] = None,
     ) -> None:
         """
         Raise or update an alarm. If severity/trend are omitted, the defaults from
-        the alarm definition are used.
+        the alarm definition are used. details is key/value context the notifier
+        may forward northbound (e.g. the o-ran-fm leaves of a mirrored O-RU fault).
         """
         now = datetime.utcnow()
         with self._lock:
@@ -159,6 +169,7 @@ class AlarmManager:
                 or (old_sev != new_sev)
                 or (state.trend != new_trend)
                 or (state.last_message != message)
+                or (state.last_details != details)
             )
             if not changed:
                 return  # no-op
@@ -168,6 +179,7 @@ class AlarmManager:
             state.trend = new_trend
             state.last_change_ts = now
             state.last_message = message
+            state.last_details = details
 
         self._emit_event(
             AlarmEvent(
@@ -180,15 +192,23 @@ class AlarmManager:
                 trend=new_trend,
                 timestamp=now,
                 message=message,
+                details=details,
             )
         )
 
-    def clear_alarm(self, alarm_id: int, message: Optional[str] = None) -> None:
+    def clear_alarm(
+        self, alarm_id: int, message: Optional[str] = None, *, details: Optional[Mapping[str, str]] = None
+    ) -> None:
         """Clear an alarm. Emits an event only if the alarm was active or changed."""
         now = datetime.utcnow()
         with self._lock:
             state = self._get_state_or_raise(alarm_id)
-            if not state.active and state.severity == AlarmSeverity.CLEARED and state.last_message == message:
+            if (
+                not state.active
+                and state.severity == AlarmSeverity.CLEARED
+                and state.last_message == message
+                and state.last_details == details
+            ):
                 return  # no-op
 
             old_sev = state.severity
@@ -197,6 +217,7 @@ class AlarmManager:
             state.trend = AlarmTrend.LESS_SEVERE if old_sev != AlarmSeverity.CLEARED else AlarmTrend.NO_CHANGE
             state.last_change_ts = now
             state.last_message = message
+            state.last_details = details
 
         self._emit_event(
             AlarmEvent(
@@ -209,6 +230,7 @@ class AlarmManager:
                 trend=state.trend,
                 timestamp=now,
                 message=message,
+                details=details,
             )
         )
 

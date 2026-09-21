@@ -773,12 +773,7 @@ if __name__ == "__main__":
             f"trend={evt.trend.name} msg={evt.message or '-'}"
         )
 
-        ves.send_alarm(
-            alarm_id=evt.alarm_id,
-            alarm=evt.name,
-            alarm_type=evt.alarm_type,
-            severity=evt.new_severity.name,
-        )
+        ves.send_alarm_event(evt)
 
     alarms = AlarmManager(
         AlarmDefinitions.defs,
