@@ -331,8 +331,6 @@ async def orchestrator(args, alarm_mgr):
             args.ru_provision,
             sync_timeout_s=args.ru_sync_timeout,
             interface_timeout_s=args.ru_interface_timeout,
-            supervision_interval=args.ru_supervision_interval,
-            supervision_guard=args.ru_supervision_guard,
         )
         mplane_session.register_cycle_handler(provisioner.provision)
     pm_metrics = PmMetrics(state, args.profile)

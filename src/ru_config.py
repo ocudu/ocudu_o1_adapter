@@ -810,16 +810,15 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
                     states[carrier["name"]] = carrier.get("state")
         return states
 
-    def wait_for_carriers_ready(self, timeout_s=120, poll_interval_s=5, on_poll=None, strict=False):
+    def wait_for_carriers_ready(self, timeout_s=120, poll_interval_s=5, strict=False):
         """Poll array-carriers state until every carrier reports READY.
 
         The carrier state machine is asynchronous (DISABLED -> BUSY -> READY);
         an accepted activation edit is only an attempt — this readback is the
         confirmation. Returns the final {carrier-name: state} map either way;
         the caller judges completeness (empty means the O-RU exposed none).
-        on_poll, when given, runs once per polling round (for example to feed
-        a supervision watchdog). strict is forwarded to the state read so a
-        dead session raises instead of reading as carrier-less.
+        strict is forwarded to the state read so a dead session raises instead
+        of reading as carrier-less.
         """
         deadline = time.monotonic() + timeout_s
         while True:
@@ -829,8 +828,6 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return states
-            if on_poll is not None:
-                on_poll()
             time.sleep(min(poll_interval_s, remaining))
 
     def wait_for_sync_locked(self, timeout_s=300, poll_interval_s=5):

@@ -27,24 +27,20 @@ carrier reports READY (bounded) and logs the resulting {carrier: state} map.
 An accepted edit whose carriers never reach READY is a loud warning.
 
 The sync wait can lawfully outlast the o-ran-supervision budget (PTP lock on
-a cold boot takes minutes; the budget is notification-interval + guard), and
-it runs before the session's notification-driven watchdog loop starts — so
-the provisioner feeds the watchdog itself on one schedule for the whole
-cycle: a supervision-watchdog-reset at half the notification interval,
-checked at every poll of both waits and once more before the activation
-edit. rpc-error replies are alive-but-rejected (the mock RU has no
-application behind the RPC); any transport failure, on the reset or on the
-strict sync read, propagates so the session recycles promptly instead of
-polling a dead session for the rest of the timeout.
+a cold boot takes minutes; the budget is notification-interval + guard): the
+session keeps the O-RU's watchdog fed on its own schedule while its cycle
+handlers run, so the provisioner only waits. rpc-error replies are
+alive-but-rejected; any transport failure, on an edit or on the strict sync
+read, propagates so the session recycles promptly instead of polling a dead
+session for the rest of the timeout.
 
 Under the hybrid-odu role the VLAN interface is the management plane's
 (ietf-interfaces is read-only for the O-DU, Table 6.5-1) and the processing
 element's transport-flow/interface-name is a leafref into it: the provisioner
 binds the element to processing.interface_name when the profile declares it,
 else to the l2vlan interface carrying processing.vlan, and waits up to
-interface_timeout_s (feeding the watchdog) for that interface to exist before
-pushing anything. A cycle that never sees it pushes nothing; the next connect
-cycle tries again.
+interface_timeout_s for that interface to exist before pushing anything. A
+cycle that never sees it pushes nothing; the next connect cycle tries again.
 
 Not covered here (deliberately): re-activation after an availability-state
 FAULTY episode clears mid-session — carriers deactivated by the O-RU are
@@ -76,22 +72,14 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         sync_timeout_s=300,
         sync_poll_s=5,
         *,
-        supervision_interval=60,
-        supervision_guard=10,
         carrier_ready_timeout_s=120,
         interface_timeout_s=300,
     ):
         self.provision_config = provision_config
         self.sync_timeout_s = sync_timeout_s
         self.sync_poll_s = sync_poll_s
-        self.supervision_interval = supervision_interval
-        self.supervision_guard = supervision_guard
         self.carrier_ready_timeout_s = carrier_ready_timeout_s
         self.interface_timeout_s = interface_timeout_s
-        # one feed schedule per provision() call (one session, one worker
-        # thread at a time), and the rejected-reset warning once per call
-        self._next_feed = 0.0
-        self._feed_rejected_logged = False
 
     def provision(self, ru_config):
         """Provision the O-RU, activating carriers only once sync is LOCKED.
@@ -106,8 +94,6 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         logged loudly and the session is left supervised; the next connect
         cycle re-provisions.
         """
-        self._next_feed = time.monotonic() + self._feed_period()
-        self._feed_rejected_logged = False
         try:
             config = self._resolve_interface(ru_config)
             if config is None:
@@ -116,7 +102,6 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
             if self._activation_state() != "ACTIVE":
                 # the carriers are deliberately left down: no sync
                 # precondition, no receipt to wait for
-                self._feed_if_due(ru_config)
                 ru_config.activate_full_config(config)
                 logging.info("O-RU provisioned; carriers written INACTIVE by configuration")
                 return
@@ -125,8 +110,6 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
                     "O-RU not sync-LOCKED within %ss; provisioned but carriers left inactive", self.sync_timeout_s
                 )
                 return
-            # the activation edit may itself block for the RPC timeout
-            self._feed_if_due(ru_config)
             ru_config.activate_full_config(config)
             states = self._wait_for_carriers_ready(ru_config)
             receipt = ", ".join(f"{name}={state}" for name, state in sorted(states.items())) or "none exposed"
@@ -156,7 +139,7 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         plane's and transport-flow/interface-name is a leafref into it, so
         the name is processing.interface_name when declared, else the l2vlan
         interface carrying processing.vlan, and the cycle waits up to
-        interface_timeout_s for it to exist, feeding the watchdog. None when
+        interface_timeout_s for it to exist. None when
         it never appeared: logged, nothing pushed, the next connect cycle
         tries again (the O-RU would reject the element and stop the cycle
         there anyway).
@@ -168,7 +151,6 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         vlan = str(processing["vlan"])
         deadline = time.monotonic() + self.interface_timeout_s
         while True:
-            self._feed_if_due(ru_config)
             name = self._find_vlan_interface(ru_config, declared, vlan)
             if name is not None:
                 logging.info("Processing element bound to the management plane's interface %s (VLAN %s)", name, vlan)
@@ -221,25 +203,14 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
     def _activation_state(self):
         return str((self.provision_config.get("activation") or {}).get("state", "ACTIVE")).upper()
 
-    def _feed_period(self):
-        return max(0.05, self.supervision_interval / 2)
-
-    def _feed_if_due(self, ru_config):
-        """Feed the watchdog when the cycle-wide schedule says so."""
-        if time.monotonic() >= self._next_feed:
-            self._feed_watchdog(ru_config)
-            self._next_feed = time.monotonic() + self._feed_period()
-
     def _wait_for_sync_locked(self, ru_config):
-        """Poll sync-status until LOCKED, feeding the supervision watchdog.
+        """Poll sync-status until LOCKED.
 
-        The strict status read raises on a dead session; the watchdog feed
-        keeps the O-RU's supervision budget from starving while waiting for
-        PTP lock.
+        The strict status read raises on a dead session; the session feeds
+        the supervision watchdog while this wait runs.
         """
         deadline = time.monotonic() + self.sync_timeout_s
         while True:
-            self._feed_if_due(ru_config)
             if ru_config.get_sync_status(strict=True).get("sync_state") == "LOCKED":
                 return True
             remaining = deadline - time.monotonic()
@@ -248,36 +219,15 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
             time.sleep(min(self.sync_poll_s, remaining))
 
     def _wait_for_carriers_ready(self, ru_config):
-        """Poll array-carriers state until every carrier is READY, feeding the watchdog.
+        """Poll array-carriers state until every carrier is READY.
 
         The activation edit is only an attempt — carrier state is asynchronous
-        (DISABLED -> BUSY -> READY) and this readback is the receipt. Runs
-        before the session's notification-driven watchdog loop starts, so it
-        stays on the provisioner's feed schedule. Returns the final
-        {carrier-name: state} map; the caller judges completeness.
+        (DISABLED -> BUSY -> READY) and this readback is the receipt. Returns
+        the final {carrier-name: state} map; the caller judges completeness.
         """
         return ru_config.wait_for_carriers_ready(
-            timeout_s=self.carrier_ready_timeout_s,
-            poll_interval_s=self.sync_poll_s,
-            on_poll=lambda: self._feed_if_due(ru_config),
-            strict=True,
+            timeout_s=self.carrier_ready_timeout_s, poll_interval_s=self.sync_poll_s, strict=True
         )
-
-    def _feed_watchdog(self, ru_config):
-        """Reset the supervision watchdog; rpc-error is alive-but-rejected.
-
-        A rejected reset during a long wait means the O-RU's watchdog is not
-        being fed at all, so the first one in a cycle is a warning; the rest
-        are debug noise.
-        """
-        try:
-            ru_config.reset_supervision_watchdog(self.supervision_interval, self.supervision_guard)
-        except rpc_ops.RPCError as err:
-            if self._feed_rejected_logged:
-                logging.debug("supervision-watchdog-reset rejected during provisioning: %s", err)
-            else:
-                self._feed_rejected_logged = True
-                logging.warning("supervision-watchdog-reset rejected during provisioning: %s", err)
 
 
 # tdd keys that steer the provisioning steps rather than describe a pattern;

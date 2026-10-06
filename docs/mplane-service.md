@@ -99,11 +99,14 @@ Extension seams: `register_notification_handler(fn)` receives non-supervision
 notifications (exceptions isolated) and `register_cycle_handler(fn)` runs with
 the `RuConfig` client once per connect cycle, after the initial watchdog reset
 is answered — accepted or not — and before the notification loop starts
-(transport failures recycle the session, handler bugs are isolated). Once the
-handlers return the session resets the watchdog once more and derives its
-starvation budget from that reply: a handler that ran long had to feed the
-O-RU's watchdog itself, and every feed restarts the O-RU's timer from an
-instant the session never saw. `--ru_provision_config` registers the
+(transport failures recycle the session, handler bugs are isolated). While the
+handlers run the session keeps the O-RU's watchdog fed on its own schedule — a
+`supervision-watchdog-reset` every half interval, on the notification session,
+so nothing interleaves with the handlers' RPCs on the command session — which
+is what lets a handler wait minutes for PTP lock or for an interface the
+management plane has yet to create; once they return the session resets the
+watchdog once more and derives its starvation budget from that reply, since
+every feed restarted the O-RU's timer from an instant it only scheduled. `--ru_provision_config` registers the
 provisioner on the cycle seam (below); nothing consumes the notification seam
 yet, and array-carrier state-change notifications are logged at INFO as the
 activation receipt regardless.
@@ -197,8 +200,7 @@ element's `interface-name` is a leafref into it, so the provisioner binds the
 element to `processing.interface_name` when the profile declares it (the name
 the management plane uses) and otherwise to the l2vlan interface carrying
 `processing.vlan`, read from the O-RU. It waits up to `--ru_interface_timeout`
-(default 300 s; 0 reads once) for that interface to exist, feeding the
-supervision watchdog as during the sync wait; a cycle that never sees it
+(default 300 s; 0 reads once) for that interface to exist; a cycle that never sees it
 pushes nothing, logs a warning and leaves the rest to the next connect cycle,
 instead of pushing an element the O-RU must reject. `activation.tolerate_reply_timeout`
 defaults to true on this path — unlike `set_full_config` and the CLI, where it
@@ -215,17 +217,14 @@ arrives. A profile with `activation.state: INACTIVE` skips the wait and writes
 the carriers inactive right away. Two properties of the wait matter
 operationally:
 
-- the provisioner **feeds the supervision watchdog** on one schedule for the
-  whole cycle — at half the notification interval, checked at every poll of
-  the sync wait and of the receipt wait and once more before the activation
-  edit — because a cold-boot PTP lock lawfully outlasts the supervision budget
-  and the cycle runs before the session's notification-driven reset loop
-  starts; a rejected reset there is a warning once per cycle;
+- the provisioner **never feeds the supervision watchdog itself**: a cold-boot
+  PTP lock lawfully outlasts the supervision budget, and the session feeds the
+  watchdog while its cycle handlers run (above), so the wait is just a wait;
 - the sync read is **strict**, so a session that dies mid-wait raises and
   recycles immediately instead of being polled as not-yet-LOCKED.
 
 After activation the array-carriers state is polled until every carrier
-reports READY (bounded, on the same feed schedule) and the resulting
+reports READY (bounded) and the resulting
 `{carrier: state}` map is logged as the receipt — INFO when complete, WARNING
 otherwise. An rpc-error from any provisioning edit or strict read is logged
 and does **not** recycle the session: a reconnect would re-push the identical
@@ -295,11 +294,13 @@ notification interval exceeds `--ru_supervision_interval` +
 `--ru_supervision_guard`, the session trips starvation — DEGRADED, alarm
 1004 — on every cycle. Set `--ru_supervision_interval` to the O-RU's value.
 
-Provisioning feeds the watchdog before activation and at every poll of its two
-waits, but not during the edit sequence itself, which is bounded only by the
-RPC timeout per edit; a full configuration lands well inside the supervision
-budget on the hardware this was run against. Those feeds bypass the session's
-own accounting, so `stats["watchdog_resets"]` counts the session's resets only.
+The session's feeds during the cycle handlers are sent on the notification
+session every half interval regardless of what the handler is doing, so a slow
+edit on the command session cannot starve the watchdog; on a call-home pair
+both roles share one session and the O-RU serves the RPCs in order, so a feed
+queued behind a long edit arrives when that edit completes — still inside the
+budget for any edit bounded by the RPC timeout. Those feeds count in
+`stats["watchdog_resets"]` like every other reset.
 
 ## Verification
 
@@ -313,8 +314,7 @@ alive-but-rejected path: the session must hold the connection without
 claiming SUPERVISED. Accepted resets need an O-RU that implements the RPC;
 supervision-notification round trips are covered by injecting notifications
 into the simulator where docker can reach it. Provision-on-connect is covered
-the same two ways: scripted fakes for the sync gating, watchdog feeding and
-rpc-error handling, and the simulator for the applied configuration — it never
+the same two ways: scripted fakes for the sync gating and rpc-error handling, and the simulator for the applied configuration — it never
 reports sync LOCKED, so the suite proves provisioned-but-inactive, and a leaf
 perturbed between cycles is restored after a forced recycle, the proof that a
 reconnect genuinely re-provisions. The LOCKED and READY paths need an O-RU.

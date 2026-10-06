@@ -197,13 +197,16 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
         """Register a callable(ru_config) run once per connect cycle.
 
         Handlers run after the initial supervision-watchdog reset is answered,
-        accepted or not, and before the notification loop starts; once they
-        return the session resets the watchdog again, so the budget it then
-        waits on follows the O-RU's timer even when a handler fed it. They run
-        blocking NETCONF calls in a worker thread — the extension seam for
-        consumers that must reconcile state notifications alone cannot replay
-        after a reconnect. NCClientError/OSError propagate and recycle the
-        session; any other handler exception is logged and isolated.
+        accepted or not, and before the notification loop starts. They run
+        blocking NETCONF calls in a worker thread while the session keeps the
+        O-RU's watchdog fed on its own schedule, so a handler may block for
+        longer than the supervision budget (a sync wait, an interface wait, a
+        slow edit) without feeding it; once the handlers return the session
+        resets the watchdog again and derives its budget from that reply. The
+        extension seam for consumers that must reconcile state notifications
+        alone cannot replay after a reconnect. NCClientError/OSError propagate
+        and recycle the session; any other handler exception is logged and
+        isolated.
         """
         self._cycle_handlers.append(handler)
 
@@ -254,12 +257,11 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
                 if fed:
                     if accepted:
                         self._enter_supervised()
-                    await asyncio.to_thread(self._run_cycle_handlers, ru_config)
+                    fed = await self._run_cycle_handlers_fed(ru_config)
                 if fed and self._cycle_handlers:
-                    # A long handler must have fed the watchdog itself (or the
-                    # O-RU would have torn the session down), and every feed
-                    # restarts the O-RU's timer from an instant this session
-                    # never saw: derive the budget from a reset of its own.
+                    # The feeds sent while the handlers ran restarted the O-RU's
+                    # timer from instants this loop only scheduled: derive the
+                    # budget from a reset of its own.
                     fed, deadline, _ = await self._reset_watchdog(ru_config)
                 if fed:
                     await self._listen(ru_config, stop_event, deadline)
@@ -684,6 +686,35 @@ class MplaneSession:  # pylint: disable=too-many-instance-attributes
                 raise
             except Exception:  # pylint: disable=broad-exception-caught
                 logging.exception("RU cycle handler failed")
+
+    async def _run_cycle_handlers_fed(self, ru_config):
+        """Run the cycle handlers on a worker thread, feeding the watchdog meanwhile.
+
+        A handler may lawfully outlast the supervision budget (a cold-boot PTP
+        lock, a management plane still creating the interface), so until the
+        thread returns this loop sends a supervision-watchdog-reset every half
+        interval. The resets go out on the notification session, which
+        handlers never use, so nothing interleaves with their RPCs on the
+        command session; a call-home pair shares one session, where ncclient
+        multiplexes the RPCs by message-id. A rejected reset is logged by
+        _reset_watchdog as elsewhere; a reset the O-RU does not answer at all
+        stops the feeding, the thread is still awaited (its next RPC fails the
+        same way) and False is returned so the cycle recycles. Handler
+        exceptions propagate as from _run_cycle_handlers.
+        """
+        if not self._cycle_handlers:
+            return True
+        handlers = asyncio.ensure_future(asyncio.to_thread(self._run_cycle_handlers, ru_config))
+        period = max(0.05, self.interval / 2)
+        fed = True
+        while True:
+            done, _ = await asyncio.wait({handlers}, timeout=period)
+            if done:
+                break
+            if fed:
+                fed, _, _ = await self._reset_watchdog(ru_config)
+        await handlers
+        return fed
 
     def _enter_supervised(self):
         """Enter (or restore) SUPERVISED, clearing the supervision alarm.
