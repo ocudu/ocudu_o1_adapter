@@ -3,12 +3,6 @@
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 terraform {
-  required_providers {
-    gitlab = {
-      source  = "gitlabhq/gitlab"
-      version = ">= 18.0"
-    }
-  }
   backend "http" {}
 }
 
@@ -61,6 +55,7 @@ module "settings" {
   # =============================================================================
   # Basic Project Settings
   # =============================================================================
+  description      = "O1 / NETCONF management adapter"
   default_branch   = "main"
   visibility_level = "public" # private, internal, public
 
@@ -72,7 +67,7 @@ module "settings" {
   only_allow_merge_if_all_discussions_are_resolved = false
   remove_source_branch_after_merge                 = true
   resolve_outdated_diff_discussions                = false
-  squash_option                                    = "default_off" # never, always, default_on, default_off
+  squash_option                                    = "never" # never, always, default_on, default_off
   allow_merge_on_skipped_pipeline                  = false
 
   # =============================================================================
@@ -141,7 +136,7 @@ module "settings" {
     disable_overriding_approvers_per_merge_request = true
     merge_requests_author_approval                 = true
     merge_requests_disable_committers_approval     = true
-    require_password_to_approve                    = false
+    require_reauthentication_to_approve            = false
     reset_approvals_on_push                        = false
     selective_code_owner_removals                  = false
   }
@@ -161,8 +156,8 @@ module "settings" {
     main = {
       allow_force_push             = false
       code_owner_approval_required = false
-      merge_access_level           = "developer"
-      push_access_level            = "no one"
+      allowed_to_merge             = [{ access_level = "developer" }]
+      allowed_to_push              = [{ access_level = "no one" }]
     }
   }
 
