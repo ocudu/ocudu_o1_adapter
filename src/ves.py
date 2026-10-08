@@ -184,7 +184,7 @@ class VesMessages:
             self.logging.error(f"VES HTTP request failed: {e}")
             return None
 
-        if response.status_code >= 200 and response.status_code < 300:
+        if 200 <= response.status_code < 300:
             self.logging.debug("Alarm delivered successfully")
         else:
             self.logging.warning(f"Alarm delivery failed (status code: {response.status_code})")
