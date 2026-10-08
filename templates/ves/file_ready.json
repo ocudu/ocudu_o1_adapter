@@ -1,0 +1,47 @@
+{
+    "event": {
+        "commonEventHeader": {
+            "domain": "stndDefined",
+            "eventId": "{{ eventId }}",
+            "eventName": "stndDefined_PerformanceAssurance_notifyFileReady",
+            "eventType": "PerformanceAssurance",
+            "sequence": {{ sequence }},
+            "priority": "Normal",
+            "reportingEntityId": "",
+            "reportingEntityName": "{{ reportingEntityName }}",
+            "sourceId": "",
+            "sourceName": "{{ sourceName }}",
+            "startEpochMicrosec": {{ timeStamp }},
+            "lastEpochMicrosec": {{ timeStamp }},
+            "nfNamingCode": "{{ nfNamingCode }}",
+            "nfVendorName": "{{ nfVendorName }}",
+            "timeZoneOffset": "+00:00",
+            "version": "4.1",
+            "stndDefinedNamespace": "3GPP-PerformanceAssurance",
+            "vesEventListenerVersion": "7.2.1"
+        },
+        "stndDefinedFields": {
+            "schemaReference": "https://forge.3gpp.org/rep/sa5/MnS/raw/Tag_Rel16_SA104/OpenAPI/TS28532_FileDataReportingMnS.yaml#/components/schemas/NotifyFileReady",
+            "data": {
+                "href": "{{ href }}",
+                "notificationId": {{ notificationId }},
+                "notificationType": "notifyFileReady",
+                "eventTime": "{{ eventTime }}",
+                "systemDN": "{{ systemDN }}",
+                "fileInfoList": [
+                    {
+                        "fileLocation": "{{ fileLocation }}",
+                        "fileSize": {{ fileSize }},
+                        "fileReadyTime": "{{ fileReadyTime }}",
+                        "fileExpirationTime": "{{ fileExpirationTime }}",
+                        "fileCompression": "gzip",
+                        "fileFormat": "org.3GPP.32.435#measCollec",
+                        "fileDataType": "Performance"
+                    }
+                ],
+                "additionalText": ""
+            },
+            "stndDefinedFieldsVersion": "1.0"
+        }
+    }
+}

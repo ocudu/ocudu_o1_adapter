@@ -850,7 +850,7 @@ def extract_cuup_config(raw_config):
 def extract_perf_metric_jobs(raw_config) -> dict:
     """Walk ManagedElement/<NF>/PerfMetricJob and return id -> normalised job dict
     (administrativeState, performanceMetrics list, granularityPeriod int, streamTarget,
-    nf_key, nf_instance_id, plmn_id)."""
+    fileReportingPeriod int or None, nf_key, nf_id, nf_instance_id, plmn_id)."""
     jobs: dict = {}
     managed_element = raw_config.get("data", {}).get("ManagedElement", {}) or {}
     nf_instance_id = managed_element.get("@id") or managed_element.get("id") or "unknown"
@@ -869,20 +869,28 @@ def extract_perf_metric_jobs(raw_config) -> dict:
                 granularity = int(attrs.get("granularityPeriod", 1))
             except (TypeError, ValueError):
                 granularity = 1
+            try:
+                file_period = int(attrs["fileReportingPeriod"])
+            except (KeyError, TypeError, ValueError):
+                file_period = None
             jobs[job_id] = {
                 "administrativeState": attrs.get("administrativeState", "LOCKED"),
                 "performanceMetrics": ensure_list(attrs.get("performanceMetrics")),
                 "granularityPeriod": granularity,
                 "streamTarget": attrs.get("streamTarget"),
+                "fileReportingPeriod": file_period,
                 "nf_key": nf_key,
+                "nf_id": nf.get("id"),
                 "nf_instance_id": nf_instance_id,
                 "plmn_id": plmn_id,
             }
     return jobs
 
 
-def active_stream_ids(jobs: dict) -> set:
-    """Return the ids of the PerfMetricJobs that are unlocked and have a stream target."""
+def active_job_ids(jobs: dict) -> set:
+    """Return the ids of the PerfMetricJobs that are unlocked and report by stream or by file."""
     return {
-        jid for jid, job in jobs.items() if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
+        jid
+        for jid, job in jobs.items()
+        if job.get("administrativeState") == "UNLOCKED" and (job.get("streamTarget") or job.get("fileReportingPeriod"))
     }

@@ -7,7 +7,7 @@ PM (performance management) metrics processing for the O1 adapter.
 
 Handles gNB WS metric payloads (flattening, KPI rewriting per TS 28.554) and
 O-RU samples from the M-plane performance bridge, filtering both per PM job
-and pushing envelopes to the configured stream targets.
+and pushing envelopes to the configured stream targets or PM files.
 """
 
 import asyncio
@@ -18,6 +18,8 @@ from typing import Any, Optional
 
 import aiohttp
 
+from netconf_to_yaml import active_job_ids
+from pm_files import PmFiles
 from state import AppState
 
 # Version (major, minor) of the gNB JSON metrics this adapter is written for, reported by the gNB in its
@@ -179,11 +181,12 @@ def _check_metrics_version(result: Any) -> None:
 
 
 class PmMetrics:
-    """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets."""
+    """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets or PM files."""
 
-    def __init__(self, state: AppState, profile: str = "gnb"):
+    def __init__(self, state: AppState, profile: str = "gnb", pm_files: PmFiles | None = None):
         self._state = state
         self._profile = profile
+        self._pm_files = pm_files
         self._loop: Optional[asyncio.AbstractEventLoop] = None  # bound by run_pusher
 
     def bind_loop(self) -> None:
@@ -191,15 +194,11 @@ class PmMetrics:
         self._loop = asyncio.get_running_loop()
 
     def _active_jobs(self) -> dict:
-        """PM jobs that are UNLOCKED and have a stream target."""
-        return {
-            job_id: job
-            for job_id, job in self._state.pm_jobs.items()
-            if job.get("administrativeState") == "UNLOCKED" and job.get("streamTarget")
-        }
+        """PM jobs that are UNLOCKED and report by stream or by file."""
+        return {job_id: self._state.pm_jobs[job_id] for job_id in active_job_ids(self._state.pm_jobs)}
 
     async def handle_ws_message(self, msg: str) -> None:
-        """Dispatch WS messages by component type, and stream PM envelopes when configured."""
+        """Dispatch WS messages by component type, and report them to the active PM jobs."""
         try:
             data = json.loads(msg)
         except json.JSONDecodeError:
@@ -262,8 +261,11 @@ class PmMetrics:
             job_metrics = [m for m in metrics if m.get("name") in allowed] if allowed else metrics
             if not job_metrics:
                 continue
-            envelope = self._build_envelope(job_id, job, job_metrics)
-            self._state.pm_metrics_queue.put_nowait((job["streamTarget"], envelope))
+            if job.get("streamTarget"):
+                envelope = self._build_envelope(job_id, job, job_metrics)
+                self._state.pm_metrics_queue.put_nowait((job["streamTarget"], envelope))
+            elif self._pm_files:
+                self._pm_files.add_samples(job_id, job, job_metrics)
 
     def _build_envelope(self, job_id: str, job: dict, metrics: list) -> dict:
         """Construct a JSON envelope for the PM stream per the agreed schema."""

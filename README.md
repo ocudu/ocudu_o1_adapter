@@ -7,8 +7,10 @@ The application currently supports:
 * Configuration Management (CM),
 * Fault Management (FM).
 
-Performance Managment (PM) is currently implemented through a Json-based metrics service exposed over the
-Websocket interface of OCUDU.
+Performance Managment (PM) is fed by the Json-based metrics service exposed over the Websocket interface of
+OCUDU. Each `PerfMetricJob` reports either by `streamTarget` (JSON envelopes POSTed per metrics report) or by
+`fileReportingPeriod`: gzipped TS 32.435 files in `--pm_dir`, announced by a VES `notifyFileReady` pointing at
+`--pm_sftp_url`, from where the SMO downloads them. `fileLocation` is ignored.
 
 In a Kubernetes deployment the O1-Adapter is supposed to be running as a sidecar container next to the e.g.
 OCUDU DU container to control the config file generation/provisioning and livecycle of the Pod through a shared volume and REST-based API, respectively.

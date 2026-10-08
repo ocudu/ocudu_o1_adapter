@@ -19,7 +19,7 @@ from deepdiff import DeepDiff
 from jinja2 import Environment, exceptions as jinja2_exceptions, FileSystemLoader
 
 from netconf_to_yaml import (
-    active_stream_ids,
+    active_job_ids,
     extract_cell_config,
     extract_cells_config,
     extract_cucp_config,
@@ -182,10 +182,10 @@ class ConfigManager:
         # Store config
         self.last_config = raw_config
 
-        prev_active = active_stream_ids(self.state.pm_jobs)
+        prev_active = active_job_ids(self.state.pm_jobs)
         self.state.pm_jobs = extract_perf_metric_jobs(raw_config)
         # Newly-active jobs need a fresh snapshot from the gNB (one-shot on subscribe).
-        if active_stream_ids(self.state.pm_jobs) - prev_active:
+        if active_job_ids(self.state.pm_jobs) - prev_active:
             self._ws.send_metrics_subscribe()
 
         if not self._render_enabled:

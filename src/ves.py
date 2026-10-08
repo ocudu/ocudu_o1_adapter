@@ -215,18 +215,42 @@ class VesMessages:
         )
         self._send_ves_message(msg)
 
+    def send_file_ready(self, me_id, file_location, file_size, ready_time, expiration_time):
+        """Sends a stndDefined notifyFileReady (TS 28.532 FileDataReportingMnS) for one PM file."""
+        current_time = datetime.datetime.now(tz=datetime.timezone.utc)
+        environment = Environment(loader=FileSystemLoader("templates/ves"))
+        template = environment.get_template("file_ready.json")
+        msg = template.render(
+            eventId=f"{me_id}_notifyFileReady_{self.sequence}",
+            sequence=self.sequence,
+            reportingEntityName=f"ManagedElement={me_id}",
+            sourceName=me_id,
+            timeStamp=int(current_time.timestamp() * 1000000),
+            nfNamingCode=self._NF_NAMING_CODE,
+            nfVendorName=self._NF_VENDOR,
+            href=f"http://{self.oam_ipv4_address}/ManagedElement={me_id}",
+            notificationId=self.sequence,
+            eventTime=current_time.isoformat(timespec="seconds"),
+            systemDN=f"ManagedElement={me_id}",
+            fileLocation=file_location,
+            fileSize=file_size,
+            fileReadyTime=ready_time,
+            fileExpirationTime=expiration_time,
+        )
+        self._send_ves_message(msg)
+
     def _send_ves_message(self, msg):
         # one sequence number per event, delivered or not: the collector must
         # be able to tell events apart even across an outage on its side
         self.sequence = self.sequence + 1
         # Format and send request
         self.logging.debug(f"Request: {msg}")
-        formatted = str(json.loads(msg))
+        formatted = json.loads(msg)
 
         try:
             response = requests.post(
                 self.url_ves,
-                data=formatted,
+                json=formatted,
                 headers=self._HEADERS,
                 auth=(self.username, self.password),
                 verify=self._VERIFY,

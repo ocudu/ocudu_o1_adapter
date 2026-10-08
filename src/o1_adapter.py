@@ -34,6 +34,7 @@ from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
 from mplane_session import du_facing_loops_enabled, MplaneSession
+from pm_files import PmFiles
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
 from rpc_log import add_rpc_log_argument, enable_rpc_log
@@ -320,13 +321,14 @@ def load_ru_provisioning(arg_parser, args):
     return config
 
 
-async def orchestrator(args, alarm_mgr):
+async def orchestrator(args, alarm_mgr, ves_messages):
     """Orchestrator: run NETCONF + WebSocket tasks."""
     # Create shared state
     state = AppState()
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
     mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
-    pm_metrics = PmMetrics(state, args.profile)
+    pm_files = PmFiles(state, ves_messages, args.pm_dir, args.pm_sftp_url, args.profile) if args.pm_sftp_url else None
+    pm_metrics = PmMetrics(state, args.profile, pm_files)
     if mplane_session:
         if args.ru_provision:
             # registered first: the base configuration must exist before anything
@@ -366,6 +368,7 @@ async def orchestrator(args, alarm_mgr):
         mplane_session.run() if mplane_session else asyncio.sleep(0),
         ws_handler(state, args, alarm_mgr, pm_metrics) if run_ws_handler else asyncio.sleep(0),
         pm_metrics.run_pusher(),
+        pm_files.run() if pm_files else asyncio.sleep(0),
         ptp_log_monitor(args.ptp_log, state.ptp_stats_queue) if args.ptp_log else asyncio.sleep(0),
         (
             ptp_health_checker_consumer(
@@ -652,6 +655,20 @@ if __name__ == "__main__":
         help="Send PNF registration on startup",
     )
 
+    # File-based PM reporting
+    parser.add_argument(
+        "--pm_dir",
+        type=str,
+        default="/pm",
+        help="Directory for PM files, shared with the SFTP server",
+    )
+    parser.add_argument(
+        "--pm_sftp_url",
+        type=str,
+        default="",
+        help="SFTP URL of --pm_dir announced to the SMO, e.g. sftp://pm@host:22/pm (empty disables file PM)",
+    )
+
     # PTP monitor
     parser.add_argument(
         "--ptp_log",
@@ -815,6 +832,6 @@ if __name__ == "__main__":
 
     try:
         # Run NETCONF + WebSocket together
-        asyncio.run(orchestrator(cmd_args, alarms))
+        asyncio.run(orchestrator(cmd_args, alarms, ves))
     except KeyboardInterrupt:
         logging.info("Exiting...")
