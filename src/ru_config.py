@@ -483,7 +483,8 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
 
         pm_config keys (all optional): rx_window_objects (measurement-object
         names to activate as RU-level COUNT counters), rx_window_interval and
-        notification_interval (seconds). File upload stays disabled; results
+        notification_interval (seconds). enable-file-upload is left untouched (it
+        defaults to false and o-ran-performance-management 2021-03-22 lacks it); results
         are reported via measurement-result-stats notifications. Returns False
         (nothing sent) when the role may not write o-ran-performance-management,
         True after both edits.

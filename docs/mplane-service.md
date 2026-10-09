@@ -420,7 +420,9 @@ runs alongside those loops.
   `--profile ru` there is no such config, so the stream is parsed and logged,
   not pushed. Only rx-window measurement objects are ever configured — the
   other groups an O-RU may advertise in `measurement-capabilitites` are parsed
-  when streamed, never written; file upload stays disabled.
+  when streamed, never written; the edit does not touch `enable-file-upload`
+  (false by default, and absent from o-ran-performance-management 2021-03-22,
+  whose O-RUs reject an edit that names it).
 - **Cell-driven carrier state**: the DU cell's administrative state does not
   yet drive the O-RU carriers through this session; that is later work that
   needs the session under a DU-facing profile.
