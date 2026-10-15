@@ -33,6 +33,7 @@ from ncclient.transport.errors import AuthenticationError, SessionCloseError, SS
 from alarm_defs import AlarmDefinitions
 from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
+from metrics_monitor import MetricsMonitor, MetricsThresholds
 from mplane_session import du_facing_loops_enabled, MplaneSession
 from pm_files import PmFiles
 from pm_metrics import PmMetrics
@@ -328,7 +329,22 @@ async def orchestrator(args, alarm_mgr, ves_messages):
     ru_forwarder = RuForwarder(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_forward else None
     mplane_session = MplaneSession(state, args, alarm_mgr, RETRY_INTERVAL) if args.ru_supervise else None
     pm_files = PmFiles(state, ves_messages, args.pm_dir, args.pm_sftp_url, args.profile) if args.pm_sftp_url else None
-    pm_metrics = PmMetrics(state, args.profile, pm_files)
+    metrics_monitor = MetricsMonitor(
+        alarm_mgr,
+        MetricsThresholds(
+            raise_consecutive=args.metrics_raise_consecutive,
+            clear_consecutive=args.metrics_clear_consecutive,
+            cpu_major_percent=args.metrics_cpu_major,
+            cpu_critical_percent=args.metrics_cpu_critical,
+            mem_major_percent=args.metrics_mem_major,
+            mem_critical_percent=args.metrics_mem_critical,
+            max_nof_ues=args.metrics_max_nof_ues,
+            ue_major_percent=args.metrics_ue_major,
+            l2_max_slot_percent=args.metrics_l2_max_slot_percent,
+            fh_late_percent=args.metrics_fh_late_percent,
+        ),
+    )
+    pm_metrics = PmMetrics(state, args.profile, pm_files, metrics_monitor)
     if mplane_session:
         if args.ru_provision:
             # registered first: the base configuration must exist before anything
@@ -685,6 +701,54 @@ if __name__ == "__main__":
         type=int,
         default=3,
         help="Number of consecutive good samples before clearing master->local alarm",
+    )
+
+    # Alarms raised from the gNB WS metrics
+    parser.add_argument(
+        "--metrics_raise_consecutive",
+        type=int,
+        default=3,
+        help="Number of consecutive breaching metric reports before raising a metrics alarm",
+    )
+    parser.add_argument(
+        "--metrics_clear_consecutive",
+        type=int,
+        default=3,
+        help="Number of consecutive clean metric reports before clearing a metrics alarm",
+    )
+    parser.add_argument("--metrics_cpu_major", type=float, default=85.0, help="CPU usage (%%) raising alarm 3003 MAJOR")
+    parser.add_argument(
+        "--metrics_cpu_critical", type=float, default=95.0, help="CPU usage (%%) raising alarm 3003 CRITICAL"
+    )
+    parser.add_argument(
+        "--metrics_mem_major", type=float, default=85.0, help="Memory usage (%%) raising alarm 3004 MAJOR"
+    )
+    parser.add_argument(
+        "--metrics_mem_critical", type=float, default=95.0, help="Memory usage (%%) raising alarm 3004 CRITICAL"
+    )
+    parser.add_argument(
+        "--metrics_max_nof_ues",
+        type=int,
+        default=8192,
+        help="The CU-CP's UE limit (cu_cp.max_nof_ues) alarm 2005 is measured against (0 = disabled)",
+    )
+    parser.add_argument(
+        "--metrics_ue_major",
+        type=float,
+        default=90.0,
+        help="RRC connections, in %% of --metrics_max_nof_ues, raising alarm 2005 MAJOR (CRITICAL at 100%%)",
+    )
+    parser.add_argument(
+        "--metrics_l2_max_slot_percent",
+        type=float,
+        default=100.0,
+        help="MAC DL max slot processing latency, in %% of the slot duration, raising alarm 3006",
+    )
+    parser.add_argument(
+        "--metrics_fh_late_percent",
+        type=float,
+        default=1.0,
+        help="Late UL fronthaul packets, in %% of the received ones, raising alarm 3008",
     )
 
     # Logging configuration

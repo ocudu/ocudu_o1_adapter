@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 import aiohttp
 
+from metrics_monitor import MetricsMonitor
 from netconf_to_yaml import active_job_ids
 from pm_files import PmFiles
 from state import AppState
@@ -183,10 +184,17 @@ def _check_metrics_version(result: Any) -> None:
 class PmMetrics:
     """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets or PM files."""
 
-    def __init__(self, state: AppState, profile: str = "gnb", pm_files: Optional[PmFiles] = None):
+    def __init__(
+        self,
+        state: AppState,
+        profile: str = "gnb",
+        pm_files: Optional[PmFiles] = None,
+        metrics_monitor: Optional[MetricsMonitor] = None,
+    ):
         self._state = state
         self._profile = profile
         self._pm_files = pm_files
+        self._metrics_monitor = metrics_monitor
         self._loop: Optional[asyncio.AbstractEventLoop] = None  # bound by run_pusher
 
     def bind_loop(self) -> None:
@@ -219,7 +227,10 @@ class PmMetrics:
             block = data.get(key)
             if block:
                 logging.debug("WS %s metrics: %s", key, block)
-        # TODO: check for AMF connection status
+
+        # alarms are checked on every report, with or without an active PM job
+        if self._metrics_monitor:
+            self._metrics_monitor.handle_metrics(data)
 
         active_jobs = self._active_jobs()
         if not active_jobs:

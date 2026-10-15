@@ -91,6 +91,28 @@ With the option `--ru_forward` the O1 Adapter automatically forwards configurati
 $ python3 src/o1_adapter.py --netconf_host <DU-IP-ADDRESS> --netconf_username <DU-NETCONF-USERNAME> --netconf_password <DU-USER-PASSWORD> --ru_forward --ru_netconf_host <RU-IP-ADDRESS> --ru_netconf_username <RU-NETCONF-USERNAME> --ru_netconf_password <RU-USER-PASSWORD>
 ```
 
+### Metrics alarms
+
+The adapter checks every metric report of the gNB's Websocket (`src/metrics_monitor.py`) for overload, capacity
+and malfunction conditions and raises them as FM alarms towards the SMO:
+
+| ID | Name | Raised on (metric report) | Severity |
+|---|---|---|---|
+| 2001 | `AMF_CONNECTION_LOSS` | `cu-cp.ngaps.ngap[].connected` is false (no debouncing) | MAJOR |
+| 2005 | `UE_CAPACITY_NEAR_LIMIT` | peak RRC connections over all DUs ≥ `--metrics_ue_major` % of `--metrics_max_nof_ues` | MAJOR, CRITICAL at 100 % |
+| 3003 | `CPU_OVERLOAD` | `app_resource_usage.cpu_usage_percent` ≥ `--metrics_cpu_major` / `--metrics_cpu_critical` | MAJOR / CRITICAL |
+| 3004 | `MEMORY_OVERLOAD` | `app_resource_usage.mem_usage_percent` ≥ `--metrics_mem_major` / `--metrics_mem_critical` | MAJOR / CRITICAL |
+| 3006 | `L2_REALTIME_DEADLINE_MISS` | per cell: FAPI error indications, late DL/UL HARQs, or MAC DL max slot latency > `--metrics_l2_max_slot_percent` % of the slot | CRITICAL on error indications, else MAJOR |
+| 3008 | `FRONTHAUL_TIMING_VIOLATION` | per cell: late UL packets > `--metrics_fh_late_percent` %, any late DL slot or C/U-plane message; any symbol skipped by the OFH timing source | MAJOR |
+| 3009 | `PRACH_RECEPTION_FAILURE` | per cell: any PRACH occasion closed without a PRACH packet received (e.g. a misconfigured VLAN or PRACH eAxC on the O-RU) | MAJOR |
+| 3010 | `UL_RECEPTION_FAILURE` | per cell: any UL symbol whose reception window closed without its packet (e.g. a misconfigured VLAN or UL eAxC on the O-RU, or packets arriving too late) | MAJOR |
+
+An alarm is raised after `--metrics_raise_consecutive` breaching reports and cleared after
+`--metrics_clear_consecutive` clean ones (3 each by default). It escalates at once, and only a change of state or
+severity is sent northbound. The affected cells and the probable cause go in the alarm's `additionalInformation`.
+An alarm only fires if the gNB reports its metrics: enable the scheduler, MAC, OFH, CU-CP and resource-usage
+metric layers in the gNB's `metrics` configuration.
+
 ## O-RU Mplane
 
 The adapter includes an Mplane client for O-RAN WG4 O-RUs, in two layers:

@@ -1,0 +1,317 @@
+# SPDX-FileCopyrightText: Copyright (C) 2021-2026 Software Radio Systems Limited
+# SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
+# SPDX-License-Identifier: BSD-3-Clause-Open-MPI
+
+"""
+Alarms derived from the gNB WS metric payloads: overload, capacity and malfunction (e.g.
+fronthaul traffic missing for a misconfigured VLAN) conditions.
+
+Each gNB component reports on its own period and in its own WS message (cells, du, ru,
+cu-cp, app_resource_usage), with counters holding the delta of one report period. Every
+message is checked against a set of conditions; one alarm may be fed by several of them
+(e.g. one per cell). A condition turns active after `raise_consecutive` breaching reports
+and inactive after `clear_consecutive` clean ones; the alarm is raised while any of its
+conditions is active, at the highest severity among them. A report lacking a field (its
+metric layer is disabled in the gNB) leaves the condition untouched.
+"""
+
+import logging
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
+from alarm_manager import AlarmManager, AlarmSeverity
+
+AMF_CONNECTION_LOSS = 2001
+UE_CAPACITY_NEAR_LIMIT = 2005
+CPU_OVERLOAD = 3003
+MEMORY_OVERLOAD = 3004
+L2_REALTIME_DEADLINE_MISS = 3006
+FRONTHAUL_TIMING_VIOLATION = 3008
+PRACH_RECEPTION_FAILURE = 3009
+UL_RECEPTION_FAILURE = 3010
+
+# X.733 / TS 28.532 probable cause per alarm, forwarded northbound through the details
+_PROBABLE_CAUSES = {
+    AMF_CONNECTION_LOSS: "connectionEstablishmentError",
+    UE_CAPACITY_NEAR_LIMIT: "resourceAtOrNearingCapacity",
+    CPU_OVERLOAD: "cpuCyclesLimitExceeded",
+    MEMORY_OVERLOAD: "outOfMemory",
+    L2_REALTIME_DEADLINE_MISS: "performanceDegraded",
+    FRONTHAUL_TIMING_VIOLATION: "timingProblem",
+    PRACH_RECEPTION_FAILURE: "receiveFailure",
+    UL_RECEPTION_FAILURE: "receiveFailure",
+}
+
+_SEVERITY_RANK = {
+    AlarmSeverity.WARNING: 1,
+    AlarmSeverity.MINOR: 2,
+    AlarmSeverity.MAJOR: 3,
+    AlarmSeverity.CRITICAL: 4,
+}
+
+# (severity, message) of a breaching report; None for a clean one
+Breach = Optional[Tuple[AlarmSeverity, str]]
+
+
+# pylint: disable=too-many-instance-attributes
+@dataclass(frozen=True)
+class MetricsThresholds:
+    """Thresholds and debouncing of the metrics alarms."""
+
+    raise_consecutive: int = 3
+    clear_consecutive: int = 3
+    cpu_major_percent: float = 85.0
+    cpu_critical_percent: float = 95.0
+    mem_major_percent: float = 85.0
+    mem_critical_percent: float = 95.0
+    max_nof_ues: int = 8192  # the CU-CP's cu_cp.max_nof_ues
+    ue_major_percent: float = 90.0
+    l2_max_slot_percent: float = 100.0  # MAC DL slot processing max latency, in % of the slot duration
+    fh_late_percent: float = 1.0  # late UL fronthaul packets, in % of the received ones
+
+
+def _num(value) -> Optional[float]:
+    """value as a float when it is numeric (bool excluded), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _dict(value) -> dict:
+    """value when it is a dict, else an empty one."""
+    return value if isinstance(value, dict) else {}
+
+
+def _dicts(value) -> list:
+    """The dict entries of value when it is a list, else nothing."""
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+@dataclass
+class _Condition:
+    """Debounce state of one condition feeding an alarm."""
+
+    breaches: int = 0
+    cleans: int = 0
+    active: bool = False
+    severity: AlarmSeverity = AlarmSeverity.CLEARED
+    message: str = ""
+
+
+class MetricsMonitor:  # pylint: disable=too-few-public-methods
+    """Evaluates gNB metric payloads and raises/clears the metrics alarms."""
+
+    def __init__(self, alarm_mgr: AlarmManager, thresholds: MetricsThresholds = MetricsThresholds()):
+        self._alarm_mgr = alarm_mgr
+        self._thr = thresholds
+        self._conditions: Dict[int, Dict[str, _Condition]] = {alarm_id: {} for alarm_id in _PROBABLE_CAUSES}
+
+    def handle_metrics(self, data: dict) -> None:
+        """Check one decoded WS metric message."""
+        self._check_resource_usage(data.get("app_resource_usage"))
+        self._check_scheduler(data.get("cells"))
+        self._check_mac(_dict(_dict(data.get("du")).get("du_high")).get("mac"))
+        self._check_ofh(_dict(data.get("ru")).get("ofh"))
+        cu_cp = data.get("cu-cp")
+        if isinstance(cu_cp, dict):
+            self._check_amf(cu_cp.get("ngaps"))
+            self._check_ue_capacity(cu_cp.get("rrcs"))
+
+    # --- checks per WS message type ---
+
+    def _check_resource_usage(self, usage) -> None:
+        if not isinstance(usage, dict):
+            return
+        cpu = _num(usage.get("cpu_usage_percent"))
+        if cpu is not None:
+            breach = self._percent_breach(cpu, self._thr.cpu_major_percent, self._thr.cpu_critical_percent, "CPU")
+            self._update(CPU_OVERLOAD, "app", breach)
+        mem = _num(usage.get("mem_usage_percent"))
+        if mem is not None:
+            breach = self._percent_breach(mem, self._thr.mem_major_percent, self._thr.mem_critical_percent, "memory")
+            self._update(MEMORY_OVERLOAD, "app", breach)
+
+    def _check_scheduler(self, cells) -> None:
+        for cell in _dicts(cells):
+            metrics = cell.get("cell_metrics")
+            if not isinstance(metrics, dict):
+                continue
+            error_ind = _num(metrics.get("error_indication_count"))
+            late_dl = _num(metrics.get("late_dl_harqs"))
+            late_ul = _num(metrics.get("late_ul_harqs"))
+            if error_ind is None and late_dl is None and late_ul is None:
+                continue
+            error_ind, late_dl, late_ul = error_ind or 0, late_dl or 0, late_ul or 0
+            pci = metrics.get("pci")
+            breach: Breach = None
+            if error_ind > 0:
+                # the L1 rejected late slot messages
+                breach = (AlarmSeverity.CRITICAL, f"PCI {pci}: {int(error_ind)} FAPI error indications")
+            elif late_dl > 0 or late_ul > 0:
+                breach = (AlarmSeverity.MAJOR, f"PCI {pci}: {int(late_dl)} DL / {int(late_ul)} UL late HARQs")
+            self._update(L2_REALTIME_DEADLINE_MISS, f"sched-pci{pci}", breach)
+
+    def _check_mac(self, mac) -> None:
+        if not isinstance(mac, dict):
+            return
+        for cell in _dicts(mac.get("dl")):
+            avg_us = _num(cell.get("average_latency_us"))
+            max_us = _num(cell.get("max_latency_us"))
+            cpu = _num(cell.get("cpu_usage_percent"))
+            if avg_us is None or max_us is None or cpu is None or avg_us <= 0:
+                continue
+            # cpu_usage_percent is the average latency in % of the slot duration, which the
+            # report does not carry itself; scale it to the max latency
+            max_slot_percent = max_us / avg_us * cpu
+            pci = cell.get("pci")
+            breach: Breach = None
+            if max_slot_percent > self._thr.l2_max_slot_percent:
+                breach = (
+                    AlarmSeverity.MAJOR,
+                    f"PCI {pci}: MAC DL max slot latency {max_us:.0f} us ({max_slot_percent:.0f}% of the slot)",
+                )
+            self._update(L2_REALTIME_DEADLINE_MISS, f"mac-pci{pci}", breach)
+
+    def _check_ofh(self, ofh) -> None:
+        if not isinstance(ofh, dict):
+            return
+        timing = ofh.get("timing_stats")
+        if isinstance(timing, dict):
+            skipped = _num(timing.get("nof_skipped_symbols"))
+            if skipped is not None:
+                breach: Breach = None
+                if skipped > 0:
+                    breach = (AlarmSeverity.MAJOR, f"{int(skipped)} OFH symbols skipped by the timing source")
+                self._update(FRONTHAUL_TIMING_VIOLATION, "ofh-timing", breach)
+        for cell in _dicts(ofh.get("cells")):
+            self._check_ofh_cell(cell)
+
+    def _check_ofh_cell(self, cell: dict) -> None:
+        pci = cell.get("pci")
+        ul, dl = _dict(cell.get("ul")), _dict(cell.get("dl"))
+        # every counter of these two blocks is a missed or late symbol, slot or message
+        counters = {**_dict(ul.get("rx_window_stats")), **_dict(dl.get("transmitter_stats"))}
+
+        # missed rather than late: their own alarms
+        missed_prach = _num(counters.pop("nof_missed_prach_occasions", None))
+        self._check_reception(PRACH_RECEPTION_FAILURE, pci, missed_prach, "PRACH occasions")
+        missed_ul = _num(counters.pop("nof_missed_uplink_symbols", None))
+        self._check_reception(UL_RECEPTION_FAILURE, pci, missed_ul, "UL symbols")
+
+        self._check_fh_timing(pci, _dict(ul.get("received_packets")), counters)
+
+    def _check_fh_timing(self, pci, rx: dict, counters: dict) -> None:
+        if not rx and not counters:
+            return
+
+        problems = []
+        total, late = _num(rx.get("total")), _num(rx.get("late"))
+        if total and late is not None:
+            late_percent = 100.0 * late / total
+            if late_percent > self._thr.fh_late_percent:
+                problems.append(f"{late_percent:.1f}% late UL packets")
+        for name, value in counters.items():
+            count = _num(value)
+            if count:
+                problems.append(f"{name}={int(count)}")
+
+        breach: Breach = (AlarmSeverity.MAJOR, f"PCI {pci}: " + ", ".join(problems)) if problems else None
+        self._update(FRONTHAUL_TIMING_VIOLATION, f"ofh-pci{pci}", breach)
+
+    def _check_reception(self, alarm_id: int, pci, missed: Optional[float], what: str) -> None:
+        """PRACH occasions or UL symbols whose reception window closed without their packets: the
+        O-RU's U-plane does not reach the DU (e.g. a misconfigured VLAN or eAxC), or not in time."""
+        if missed is None:
+            return
+        breach: Breach = None
+        if missed > 0:
+            breach = (AlarmSeverity.MAJOR, f"PCI {pci}: {int(missed)} {what} missed")
+        self._update(alarm_id, f"ofh-pci{pci}", breach)
+
+    def _check_amf(self, ngaps) -> None:
+        if not isinstance(ngaps, dict):
+            return
+        for amf in _dicts(ngaps.get("ngap")):
+            connected = amf.get("connected")
+            if not isinstance(connected, bool):
+                continue
+            name = amf.get("amf_name") or "AMF"
+            breach: Breach = None if connected else (AlarmSeverity.MAJOR, f"{name} not connected")
+            # the connection state is reported as is, not sampled: no debouncing
+            self._update(AMF_CONNECTION_LOSS, f"amf-{name}", breach, raise_consecutive=1, clear_consecutive=1)
+
+    def _check_ue_capacity(self, rrcs) -> None:
+        if not isinstance(rrcs, dict) or self._thr.max_nof_ues <= 0:
+            return
+        peaks = [
+            _num(_dict(du.get("rrc_connection_number")).get("max_nof_rrc_connections")) for du in _dicts(rrcs.get("du"))
+        ]
+        counts = [c for c in peaks if c is not None]
+        if not counts:
+            return
+        # the sum of the per-DU peaks, an upper bound of the CU-CP's peak
+        ues = sum(counts)
+        percent = 100.0 * ues / self._thr.max_nof_ues
+        breach: Breach = None
+        if percent >= 100.0:
+            breach = (AlarmSeverity.CRITICAL, f"{int(ues)} RRC connections, at the limit of {self._thr.max_nof_ues}")
+        elif percent >= self._thr.ue_major_percent:
+            breach = (AlarmSeverity.MAJOR, f"{int(ues)} RRC connections, {percent:.0f}% of {self._thr.max_nof_ues}")
+        self._update(UE_CAPACITY_NEAR_LIMIT, "cu-cp", breach)
+
+    @staticmethod
+    def _percent_breach(value: float, major: float, critical: float, what: str) -> Breach:
+        if value >= critical:
+            return AlarmSeverity.CRITICAL, f"{what} usage {value:.0f}% (critical threshold {critical:.0f}%)"
+        if value >= major:
+            return AlarmSeverity.MAJOR, f"{what} usage {value:.0f}% (major threshold {major:.0f}%)"
+        return None
+
+    # --- debouncing and alarm bookkeeping ---
+
+    def _update(  # pylint: disable=too-many-arguments
+        self,
+        alarm_id: int,
+        source: str,
+        breach: Breach,
+        *,
+        raise_consecutive: Optional[int] = None,
+        clear_consecutive: Optional[int] = None,
+    ) -> None:
+        """Feed one report's outcome for (alarm_id, source) and sync the alarm on a change.
+
+        Only a change of the active state or severity goes northbound: the message of a
+        breach carries per-report counts and is refreshed with the next such change.
+        """
+        cond = self._conditions[alarm_id].setdefault(source, _Condition())
+        was = (cond.active, cond.severity)
+        if breach:
+            cond.breaches += 1
+            cond.cleans = 0
+            if cond.active or cond.breaches >= (raise_consecutive or self._thr.raise_consecutive):
+                cond.active = True
+                cond.severity, cond.message = breach
+        else:
+            cond.cleans += 1
+            cond.breaches = 0
+            if cond.active and cond.cleans >= (clear_consecutive or self._thr.clear_consecutive):
+                cond.active = False
+                cond.severity, cond.message = AlarmSeverity.CLEARED, ""
+        if (cond.active, cond.severity) != was:
+            self._sync_alarm(alarm_id)
+
+    def _sync_alarm(self, alarm_id: int) -> None:
+        active = {src: c for src, c in self._conditions[alarm_id].items() if c.active}
+        if not active:
+            logging.info("Metrics alarm %d cleared", alarm_id)
+            self._alarm_mgr.clear_alarm(alarm_id, message="back to normal")
+            return
+        severity = max((c.severity for c in active.values()), key=_SEVERITY_RANK.__getitem__)
+        details = {"probable-cause": _PROBABLE_CAUSES[alarm_id]}
+        details.update({src: c.message for src, c in sorted(active.items())})
+        self._alarm_mgr.set_alarm(
+            alarm_id,
+            severity=severity,
+            message="; ".join(c.message for _, c in sorted(active.items())),
+            details=details,
+        )
