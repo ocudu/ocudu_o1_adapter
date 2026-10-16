@@ -100,6 +100,8 @@ and malfunction conditions and raises them as FM alarms towards the SMO:
 |---|---|---|---|
 | 2001 | `AMF_CONNECTION_LOSS` | `cu-cp.ngaps.ngap[].connected` is false (no debouncing) | MAJOR |
 | 2005 | `UE_CAPACITY_NEAR_LIMIT` | peak RRC connections over all DUs ≥ `--metrics_ue_major` % of `--metrics_max_nof_ues` | MAJOR, CRITICAL at 100 % |
+| 2006 | `RRC_ESTABLISHMENT_FAILURES` | per DU: failed RRC connection establishments > `--metrics_rrc_fail_percent` % of the attempted ones, judged over at least `--metrics_rrc_min_attempts` attempts | MAJOR, CRITICAL when all failed |
+| 2008 | `PDU_SESSION_SETUP_FAILURES` | per AMF: failed PDU session setups > `--metrics_pdu_fail_percent` % of the requested ones, judged over at least `--metrics_pdu_min_attempts` requests | MAJOR, CRITICAL when all failed |
 | 3003 | `CPU_OVERLOAD` | `app_resource_usage.cpu_usage_percent` ≥ `--metrics_cpu_major` / `--metrics_cpu_critical` | MAJOR / CRITICAL |
 | 3004 | `MEMORY_OVERLOAD` | `app_resource_usage.mem_usage_percent` ≥ `--metrics_mem_major` / `--metrics_mem_critical` | MAJOR / CRITICAL |
 | 3006 | `L2_REALTIME_DEADLINE_MISS` | per cell: FAPI error indications, late DL/UL HARQs, or MAC DL max slot latency > `--metrics_l2_max_slot_percent` % of the slot | CRITICAL on error indications, else MAJOR |
@@ -110,6 +112,7 @@ and malfunction conditions and raises them as FM alarms towards the SMO:
 An alarm is raised after `--metrics_raise_consecutive` breaching reports and cleared after
 `--metrics_clear_consecutive` clean ones (3 each by default). It escalates at once, and only a change of state or
 severity is sent northbound. The affected cells and the probable cause go in the alarm's `additionalInformation`.
+The RRC and PDU session counters are cumulative in the gNB; the adapter works on their increase between reports.
 An alarm only fires if the gNB reports its metrics: enable the scheduler, MAC, OFH, CU-CP and resource-usage
 metric layers in the gNB's `metrics` configuration.
 

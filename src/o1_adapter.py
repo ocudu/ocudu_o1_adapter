@@ -340,6 +340,10 @@ async def orchestrator(args, alarm_mgr, ves_messages):
             mem_critical_percent=args.metrics_mem_critical,
             max_nof_ues=args.metrics_max_nof_ues,
             ue_major_percent=args.metrics_ue_major,
+            rrc_fail_percent=args.metrics_rrc_fail_percent,
+            rrc_min_attempts=args.metrics_rrc_min_attempts,
+            pdu_fail_percent=args.metrics_pdu_fail_percent,
+            pdu_min_attempts=args.metrics_pdu_min_attempts,
             l2_max_slot_percent=args.metrics_l2_max_slot_percent,
             fh_late_percent=args.metrics_fh_late_percent,
         ),
@@ -737,6 +741,30 @@ if __name__ == "__main__":
         type=float,
         default=90.0,
         help="RRC connections, in %% of --metrics_max_nof_ues, raising alarm 2005 MAJOR (CRITICAL at 100%%)",
+    )
+    parser.add_argument(
+        "--metrics_rrc_fail_percent",
+        type=float,
+        default=10.0,
+        help="Failed RRC connection establishments, in %% of the attempted ones, raising alarm 2006",
+    )
+    parser.add_argument(
+        "--metrics_rrc_min_attempts",
+        type=int,
+        default=10,
+        help="RRC connection establishment attempts the failure ratio of alarm 2006 is judged over",
+    )
+    parser.add_argument(
+        "--metrics_pdu_fail_percent",
+        type=float,
+        default=10.0,
+        help="Failed PDU session setups, in %% of the requested ones, raising alarm 2008",
+    )
+    parser.add_argument(
+        "--metrics_pdu_min_attempts",
+        type=int,
+        default=10,
+        help="PDU session setup requests the failure ratio of alarm 2008 is judged over",
     )
     parser.add_argument(
         "--metrics_l2_max_slot_percent",

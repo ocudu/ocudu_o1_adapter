@@ -16,13 +16,15 @@ metric layer is disabled in the gNB) leaves the condition untouched.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from alarm_manager import AlarmManager, AlarmSeverity
 
 AMF_CONNECTION_LOSS = 2001
 UE_CAPACITY_NEAR_LIMIT = 2005
+RRC_ESTABLISHMENT_FAILURES = 2006
+PDU_SESSION_SETUP_FAILURES = 2008
 CPU_OVERLOAD = 3003
 MEMORY_OVERLOAD = 3004
 L2_REALTIME_DEADLINE_MISS = 3006
@@ -34,6 +36,8 @@ UL_RECEPTION_FAILURE = 3010
 _PROBABLE_CAUSES = {
     AMF_CONNECTION_LOSS: "connectionEstablishmentError",
     UE_CAPACITY_NEAR_LIMIT: "resourceAtOrNearingCapacity",
+    RRC_ESTABLISHMENT_FAILURES: "callEstablishmentError",
+    PDU_SESSION_SETUP_FAILURES: "callEstablishmentError",
     CPU_OVERLOAD: "cpuCyclesLimitExceeded",
     MEMORY_OVERLOAD: "outOfMemory",
     L2_REALTIME_DEADLINE_MISS: "performanceDegraded",
@@ -66,6 +70,10 @@ class MetricsThresholds:
     mem_critical_percent: float = 95.0
     max_nof_ues: int = 8192  # the CU-CP's cu_cp.max_nof_ues
     ue_major_percent: float = 90.0
+    rrc_fail_percent: float = 10.0  # failed RRC connection establishments, in % of the attempted ones
+    rrc_min_attempts: int = 10  # attempts the failure ratio is judged over, gathered across reports
+    pdu_fail_percent: float = 10.0  # failed PDU session setups, in % of the requested ones
+    pdu_min_attempts: int = 10
     l2_max_slot_percent: float = 100.0  # MAC DL slot processing max latency, in % of the slot duration
     fh_late_percent: float = 1.0  # late UL fronthaul packets, in % of the received ones
 
@@ -80,6 +88,14 @@ def _num(value) -> Optional[float]:
 def _dict(value) -> dict:
     """value when it is a dict, else an empty one."""
     return value if isinstance(value, dict) else {}
+
+
+def _counts(value) -> Optional[Dict[str, float]]:
+    """A counter with cause ({cause: count}) as such, a plain counter as {"total": count}; else None."""
+    if isinstance(value, dict):
+        return {str(k): n for k, n in ((k, _num(v)) for k, v in value.items()) if n is not None}
+    count = _num(value)
+    return None if count is None else {"total": count}
 
 
 def _dicts(value) -> list:
@@ -98,6 +114,30 @@ class _Condition:
     message: str = ""
 
 
+@dataclass
+class _CumulativeFailures:
+    """Attempts and failures (per cause) of one source as the gNB counts them, cumulative since it
+    started: the counts last reported, and the increase gathered since the ratio was last judged."""
+
+    attempted: float
+    failed: Dict[str, float]
+    window_attempted: float = 0.0
+    window_failed: Dict[str, float] = field(default_factory=dict)
+
+    def add(self, attempted: float, failed: Dict[str, float], min_attempts: int):
+        """Gather the increase up to these counts; once min_attempts are gathered, hand over the
+        window as (attempted, {cause: failed}) and start a new one, else None."""
+        self.window_attempted += attempted - self.attempted
+        for cause, count in failed.items():
+            self.window_failed[cause] = self.window_failed.get(cause, 0.0) + max(count - self.failed.get(cause, 0.0), 0)
+        self.attempted, self.failed = attempted, failed
+        if self.window_attempted < max(min_attempts, 1):
+            return None
+        window = (self.window_attempted, self.window_failed)
+        self.window_attempted, self.window_failed = 0.0, {}
+        return window
+
+
 class MetricsMonitor:  # pylint: disable=too-few-public-methods
     """Evaluates gNB metric payloads and raises/clears the metrics alarms."""
 
@@ -105,6 +145,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         self._alarm_mgr = alarm_mgr
         self._thr = thresholds
         self._conditions: Dict[int, Dict[str, _Condition]] = {alarm_id: {} for alarm_id in _PROBABLE_CAUSES}
+        self._failures: Dict[Tuple[int, str], _CumulativeFailures] = {}
 
     def handle_metrics(self, data: dict) -> None:
         """Check one decoded WS metric message."""
@@ -115,7 +156,9 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         cu_cp = data.get("cu-cp")
         if isinstance(cu_cp, dict):
             self._check_amf(cu_cp.get("ngaps"))
+            self._check_pdu_sessions(cu_cp.get("ngaps"))
             self._check_ue_capacity(cu_cp.get("rrcs"))
+            self._check_rrc_establishments(cu_cp.get("rrcs"))
 
     # --- checks per WS message type ---
 
@@ -143,6 +186,9 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
                 continue
             error_ind, late_dl, late_ul = error_ind or 0, late_dl or 0, late_ul or 0
             pci = metrics.get("pci")
+            # TODO: raise a CELL_PRB_USAGE_HIGH alarm (2002, MINOR, probable cause "congestion") on high
+            # DL/UL PRB usage, once the gNB reports it relative to the cell's PRBs (e.g. as a percentage or
+            # with the cell's PRB count); pdsch/pusch_prbs_used_per_tdd_slot_idx are absolute and TDD only.
             breach: Breach = None
             if error_ind > 0:
                 # the L1 rejected late slot messages
@@ -258,6 +304,74 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         elif percent >= self._thr.ue_major_percent:
             breach = (AlarmSeverity.MAJOR, f"{int(ues)} RRC connections, {percent:.0f}% of {self._thr.max_nof_ues}")
         self._update(UE_CAPACITY_NEAR_LIMIT, "cu-cp", breach)
+
+    def _check_rrc_establishments(self, rrcs) -> None:
+        if not isinstance(rrcs, dict):
+            return
+        for du in _dicts(rrcs.get("du")):
+            est = _dict(du.get("rrc_connection_establishment"))
+            attempted = _counts(est.get("attempted_rrc_connection_establishments"))
+            failed = _counts(est.get("failed_rrc_connection_establishments"))
+            if attempted is not None and failed is not None:
+                self._check_failures(
+                    RRC_ESTABLISHMENT_FAILURES,
+                    f"DU {du.get('gnb_du_id')}",
+                    "RRC connection establishments",
+                    counts=(sum(attempted.values()), failed),
+                    thresholds=(self._thr.rrc_fail_percent, self._thr.rrc_min_attempts),
+                )
+
+    def _check_pdu_sessions(self, ngaps) -> None:
+        if not isinstance(ngaps, dict):
+            return
+        for amf in _dicts(ngaps.get("ngap")):
+            # the gNB reports one S-NSSAI only, the last one with PDU sessions
+            sessions = _dict(amf.get("pdu_session_management"))
+            requested = _num(sessions.get("nof_pdu_sessions_requested_to_setup"))
+            failed = _counts(sessions.get("nof_pdu_sessions_failed_to_setup"))
+            if requested is not None and failed is not None:
+                self._check_failures(
+                    PDU_SESSION_SETUP_FAILURES,
+                    f"{amf.get('amf_name') or 'AMF'} {sessions.get('s-nssai', '')}".strip(),
+                    "PDU session setups",
+                    counts=(requested, failed),
+                    thresholds=(self._thr.pdu_fail_percent, self._thr.pdu_min_attempts),
+                )
+
+    def _check_failures(  # pylint: disable=too-many-arguments
+        self,
+        alarm_id: int,
+        source: str,
+        what: str,
+        *,
+        counts: Tuple[float, Dict[str, float]],
+        thresholds: Tuple[float, int],
+    ) -> None:
+        """Failure ratio of cumulative (attempted, {cause: failed}) counts. It is judged once at
+        least min_attempts were made, so that a quiet cell does not alarm on one failure out of two."""
+        (attempted, failed), (fail_percent, min_attempts) = counts, thresholds
+        last = self._failures.get((alarm_id, source))
+        if last is None or attempted < last.attempted:
+            # first report, or the gNB restarted: a new baseline
+            self._failures[(alarm_id, source)] = _CumulativeFailures(attempted, failed)
+            return
+        window = last.add(attempted, failed, min_attempts)
+        if window is None:
+            return
+
+        self._update(alarm_id, source, self._failure_breach(source, what, window, fail_percent))
+
+    @staticmethod
+    def _failure_breach(source: str, what: str, window: Tuple[float, Dict[str, float]], fail_percent: float) -> Breach:
+        nof_attempted, nof_failed = window[0], sum(window[1].values())
+        percent = 100.0 * nof_failed / nof_attempted
+        if percent <= fail_percent:
+            return None
+        causes = ", ".join(f"{cause}={int(n)}" for cause, n in window[1].items() if n)
+        return (
+            AlarmSeverity.CRITICAL if nof_failed >= nof_attempted else AlarmSeverity.MAJOR,
+            f"{source}: {int(nof_failed)} of {int(nof_attempted)} {what} failed ({percent:.0f}%; {causes})",
+        )
 
     @staticmethod
     def _percent_breach(value: float, major: float, critical: float, what: str) -> Breach:

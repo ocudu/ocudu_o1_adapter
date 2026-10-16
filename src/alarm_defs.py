@@ -50,6 +50,18 @@ class AlarmDefinitions:
             type=AlarmType.QUALITY_OF_SERVICE,
             default_severity=AlarmSeverity.MAJOR,
         ),
+        AlarmDefinition(
+            alarm_id=2006,
+            name="RRC_ESTABLISHMENT_FAILURES",
+            type=AlarmType.COMMUNICATIONS,
+            default_severity=AlarmSeverity.MAJOR,
+        ),
+        AlarmDefinition(
+            alarm_id=2008,
+            name="PDU_SESSION_SETUP_FAILURES",
+            type=AlarmType.COMMUNICATIONS,
+            default_severity=AlarmSeverity.MAJOR,
+        ),
         # Alarm ID range 3000-3999 reserved for platform-specific alarms
         AlarmDefinition(
             alarm_id=3001,
