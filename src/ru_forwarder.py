@@ -18,6 +18,7 @@ from contextlib import suppress
 from ncclient import manager
 from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError
 
+from alarm_defs import AlarmId
 from ru_config import RuConfig
 from state import AppState
 
@@ -187,7 +188,7 @@ class RuForwarder:
                 logging.info("Connected to RU NETCONF server")
                 if self.owns_connection_alarm:
                     self.alarm_mgr.clear_alarm(
-                        1003,
+                        AlarmId.RU_NETCONF_CONNECTION_LOSS,
                         message="RU NETCONF connection restored",
                     )
                 return netconf_manager
@@ -202,7 +203,7 @@ class RuForwarder:
             logging.warning("RU NETCONF connection failed: %s", e)
             if self.owns_connection_alarm:
                 self.alarm_mgr.set_alarm(
-                    1003,
+                    AlarmId.RU_NETCONF_CONNECTION_LOSS,
                     message="RU NETCONF connection lost",
                 )
             return None
@@ -246,7 +247,7 @@ class RuForwarder:
 
             if self.owns_connection_alarm:
                 self.alarm_mgr.set_alarm(
-                    1003,
+                    AlarmId.RU_NETCONF_CONNECTION_LOSS,
                     message="RU NETCONF connection lost",
                 )
             logging.debug("Retrying RU NETCONF forwarder in %s seconds...", self.retry_interval)

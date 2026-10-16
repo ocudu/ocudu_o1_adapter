@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from alarm_defs import AlarmId
 from alarm_manager import AlarmManager
 
 # --------- tolerant regexes (use .search) ---------
@@ -184,7 +185,7 @@ async def ptp_health_checker_consumer(
                 if not master_alarm_active:
                     master_alarm_active = True
                     master_clear_confirms = 0
-                    alarm_mgr.set_alarm(3001, message="PTP master clock source is local")
+                    alarm_mgr.set_alarm(AlarmId.PTP_GM_LOSS, message="PTP master clock source is local")
                 else:
                     # still local—no clearing progress while local
                     master_clear_confirms = 0
@@ -194,7 +195,9 @@ async def ptp_health_checker_consumer(
                     master_clear_confirms += 1
                     if master_clear_confirms >= master_clear_consecutive:
                         master_alarm_active = False
-                        alarm_mgr.clear_alarm(3001, message="PTP master clock source is not local anymore")
+                        alarm_mgr.clear_alarm(
+                            AlarmId.PTP_GM_LOSS, message="PTP master clock source is not local anymore"
+                        )
                         master_clear_confirms = 0
 
             # -------- PTP4L MAX CONSECUTIVE CHECK --------
@@ -205,12 +208,14 @@ async def ptp_health_checker_consumer(
                     max_exceed_count += 1
                     if (not max_latency_alarm_active) and max_exceed_count >= max_consecutive:
                         max_latency_alarm_active = True
-                        alarm_mgr.set_alarm(3002, message="PTP max latency higher than threshold")
+                        alarm_mgr.set_alarm(
+                            AlarmId.PTP_LATENCY_TOO_HIGH, message="PTP max latency higher than threshold"
+                        )
 
                 else:
                     # reset + clear if needed
                     if max_latency_alarm_active:
-                        alarm_mgr.clear_alarm(3002, message="PTP max latency is back to normal")
+                        alarm_mgr.clear_alarm(AlarmId.PTP_LATENCY_TOO_HIGH, message="PTP max latency is back to normal")
                     max_latency_alarm_active = False
                     max_exceed_count = 0
 

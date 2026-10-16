@@ -30,7 +30,7 @@ from flask import Flask, jsonify
 from ncclient import manager
 from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError, TLSError
 
-from alarm_defs import AlarmDefinitions
+from alarm_defs import ALARM_DEFINITIONS, AlarmId
 from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
 from metrics_monitor import MetricsMonitor, MetricsThresholds
@@ -137,7 +137,7 @@ async def try_connect(args, alarm_mgr):
                 )
             logging.info("Connected to NETCONF server")
             alarm_mgr.clear_alarm(
-                1001,
+                AlarmId.NETCONF_CONNECTION_LOSS,
                 message="NETCONF connection restored",
             )
             return m
@@ -145,23 +145,23 @@ async def try_connect(args, alarm_mgr):
         return await asyncio.to_thread(connect)
     except AuthenticationError as e:
         logging.warning(f"NETCONF authentication failed for user '{args.netconf_username}': {e}")
-        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        alarm_mgr.set_alarm(AlarmId.NETCONF_CONNECTION_LOSS, message="NETCONF connection lost")
         return None
     except SSHUnknownHostError as e:
         logging.warning(f"NETCONF unknown host key for {args.netconf_host}: {e}")
-        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        alarm_mgr.set_alarm(AlarmId.NETCONF_CONNECTION_LOSS, message="NETCONF connection lost")
         return None
     except SessionCloseError as e:
         logging.warning(f"NETCONF session closed unexpectedly while connecting to {args.netconf_host}: {e}")
-        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        alarm_mgr.set_alarm(AlarmId.NETCONF_CONNECTION_LOSS, message="NETCONF connection lost")
         return None
     except SSHError as e:
         logging.warning(f"NETCONF SSH error while connecting to {args.netconf_host}:{args.netconf_port}: {e}")
-        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        alarm_mgr.set_alarm(AlarmId.NETCONF_CONNECTION_LOSS, message="NETCONF connection lost")
         return None
     except TLSError as e:
         logging.warning(f"NETCONF TLS error while connecting to {args.netconf_host}:{args.netconf_tls_port}: {e}")
-        alarm_mgr.set_alarm(1001, message="NETCONF connection lost")
+        alarm_mgr.set_alarm(AlarmId.NETCONF_CONNECTION_LOSS, message="NETCONF connection lost")
         return None
 
 
@@ -199,7 +199,7 @@ async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
             logging.info("Connection dropped (main loop)")
             state.session_state["nc_connected"] = False
             alarm_mgr.set_alarm(
-                1001,
+                AlarmId.NETCONF_CONNECTION_LOSS,
                 message="NETCONF connection lost",
             )
             stop_event.set()
@@ -275,7 +275,7 @@ async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
                 logging.info("Connected to WebSocket server")
                 state.session_state["ws_connected"] = True
                 alarm_mgr.clear_alarm(
-                    1002,
+                    AlarmId.REMOTE_CONTROL_CONNECTION_LOSS,
                     message="WS connection restored",
                 )
                 await _run_ws_session(ws, state, pm_metrics)
@@ -291,7 +291,7 @@ async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
             if state.session_state.get("ws_connected"):
                 state.session_state["ws_connected"] = False
                 alarm_mgr.set_alarm(
-                    1002,
+                    AlarmId.REMOTE_CONTROL_CONNECTION_LOSS,
                     message="WS connection closed",
                 )
             await asyncio.sleep(RETRY_INTERVAL)
@@ -914,7 +914,7 @@ if __name__ == "__main__":
         ves.send_alarm_event(evt)
 
     alarms = AlarmManager(
-        AlarmDefinitions.defs,
+        ALARM_DEFINITIONS,
         notifier=alarm_notifier,
     )
 

@@ -77,6 +77,7 @@ from ncclient import manager, NCClientError
 from ncclient.operations import rpc as rpc_ops
 from ncclient.transport import errors as transport_errors
 
+from alarm_defs import AlarmId
 from ru_config import ROLE_SUDO, ROLES, RuConfig
 from state import AppState
 
@@ -88,8 +89,8 @@ _CONNECT_FAILURES = (transport_errors.TransportError, OSError, EOFError)
 
 _SUPERVISION_TAG = "{urn:o-ran:supervision:1.0}supervision-notification"
 
-_CONNECTION_ALARM = 1003
-_SUPERVISION_ALARM = 1004
+_CONNECTION_ALARM = AlarmId.RU_NETCONF_CONNECTION_LOSS
+_SUPERVISION_ALARM = AlarmId.RU_SUPERVISION_FAILURE
 
 # NETCONF connect/RPC-reply deadline. Deliberately independent of the
 # reconnect backoff: retry_interval paces reconnect attempts, never how long

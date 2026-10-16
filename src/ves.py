@@ -105,6 +105,7 @@ class VesMessages:
         event_time=None,
         cleared=False,
         proposed_repair_actions=None,
+        probable_cause=None,
     ):
         """
         Sends an alarm (3GPP TS 28.532 notifyNewAlarm, or notifyClearedAlarm when
@@ -114,7 +115,7 @@ class VesMessages:
         message becomes additionalText; details — key/value context such as the
         o-ran-fm leaves of an O-RU fault — becomes additionalInformation, and what
         the device itself reported wins where it did: its alarm-type (hyphenated
-        o-ran-fm literal) over alarm_type, probable-cause over the alarm name,
+        o-ran-fm literal) over alarm_type, probable-cause over probable_cause over the alarm name,
         specific-problem over fault-text over the alarm name, and
         proposed-repair-actions over proposed_repair_actions (omitted when neither
         is given). event_time (ISO 8601) is the notification's eventTime, else the
@@ -158,7 +159,7 @@ class VesMessages:
             notificationId=self.sequence,
             notificationType="notifyClearedAlarm" if cleared else "notifyNewAlarm",
             trendIndication=trend,  # NO_CHANGE, MORE_SEVERE, LESS_SEVERE
-            probableCause=details.get("probable-cause") or alarm,
+            probableCause=details.get("probable-cause") or probable_cause or alarm,
             specificProblem=details.get("specific-problem") or details.get("fault-text") or alarm,
             additionalText=message or "ocudu",
             additionalInformation=details,
@@ -183,6 +184,7 @@ class VesMessages:
             details=details,
             event_time=details.get("event-time"),
             cleared=not event.became_active,
+            probable_cause=event.probable_cause,
         )
 
     def send_state_change(self, old_state="maintenance", new_state="inService"):

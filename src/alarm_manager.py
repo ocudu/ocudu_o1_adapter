@@ -59,6 +59,7 @@ class AlarmDefinition:
     type: AlarmType
     default_severity: AlarmSeverity
     default_trend: AlarmTrend = AlarmTrend.NO_CHANGE
+    probable_cause: Optional[str] = None  # X.733 / TS 28.532 probableCause
 
 
 @dataclass
@@ -89,6 +90,7 @@ class AlarmEvent:
     timestamp: datetime
     message: Optional[str] = None
     details: Optional[Mapping[str, str]] = None
+    probable_cause: Optional[str] = None
 
 
 Notifier = Callable[[AlarmEvent], None]
@@ -193,6 +195,7 @@ class AlarmManager:
                 timestamp=now,
                 message=message,
                 details=details,
+                probable_cause=state.definition.probable_cause,
             )
         )
 
@@ -231,6 +234,7 @@ class AlarmManager:
                 timestamp=now,
                 message=message,
                 details=details,
+                probable_cause=state.definition.probable_cause,
             )
         )
 

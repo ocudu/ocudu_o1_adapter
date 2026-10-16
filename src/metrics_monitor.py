@@ -16,35 +16,12 @@ metric layer is disabled in the gNB) leaves the condition untouched.
 """
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
+from alarm_defs import AlarmId
 from alarm_manager import AlarmManager, AlarmSeverity
-
-AMF_CONNECTION_LOSS = 2001
-UE_CAPACITY_NEAR_LIMIT = 2005
-RRC_ESTABLISHMENT_FAILURES = 2006
-PDU_SESSION_SETUP_FAILURES = 2008
-CPU_OVERLOAD = 3003
-MEMORY_OVERLOAD = 3004
-L2_REALTIME_DEADLINE_MISS = 3006
-FRONTHAUL_TIMING_VIOLATION = 3008
-PRACH_RECEPTION_FAILURE = 3009
-UL_RECEPTION_FAILURE = 3010
-
-# X.733 / TS 28.532 probable cause per alarm, forwarded northbound through the details
-_PROBABLE_CAUSES = {
-    AMF_CONNECTION_LOSS: "connectionEstablishmentError",
-    UE_CAPACITY_NEAR_LIMIT: "resourceAtOrNearingCapacity",
-    RRC_ESTABLISHMENT_FAILURES: "callEstablishmentError",
-    PDU_SESSION_SETUP_FAILURES: "callEstablishmentError",
-    CPU_OVERLOAD: "cpuCyclesLimitExceeded",
-    MEMORY_OVERLOAD: "outOfMemory",
-    L2_REALTIME_DEADLINE_MISS: "performanceDegraded",
-    FRONTHAUL_TIMING_VIOLATION: "timingProblem",
-    PRACH_RECEPTION_FAILURE: "receiveFailure",
-    UL_RECEPTION_FAILURE: "receiveFailure",
-}
 
 _SEVERITY_RANK = {
     AlarmSeverity.WARNING: 1,
@@ -144,8 +121,8 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
     def __init__(self, alarm_mgr: AlarmManager, thresholds: MetricsThresholds = MetricsThresholds()):
         self._alarm_mgr = alarm_mgr
         self._thr = thresholds
-        self._conditions: Dict[int, Dict[str, _Condition]] = {alarm_id: {} for alarm_id in _PROBABLE_CAUSES}
-        self._failures: Dict[Tuple[int, str], _CumulativeFailures] = {}
+        self._conditions: Dict[AlarmId, Dict[str, _Condition]] = defaultdict(dict)
+        self._failures: Dict[Tuple[AlarmId, str], _CumulativeFailures] = {}
 
     def handle_metrics(self, data: dict) -> None:
         """Check one decoded WS metric message."""
@@ -168,11 +145,11 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         cpu = _num(usage.get("cpu_usage_percent"))
         if cpu is not None:
             breach = self._percent_breach(cpu, self._thr.cpu_major_percent, self._thr.cpu_critical_percent, "CPU")
-            self._update(CPU_OVERLOAD, "app", breach)
+            self._update(AlarmId.CPU_OVERLOAD, "app", breach)
         mem = _num(usage.get("mem_usage_percent"))
         if mem is not None:
             breach = self._percent_breach(mem, self._thr.mem_major_percent, self._thr.mem_critical_percent, "memory")
-            self._update(MEMORY_OVERLOAD, "app", breach)
+            self._update(AlarmId.MEMORY_OVERLOAD, "app", breach)
 
     def _check_scheduler(self, cells) -> None:
         for cell in _dicts(cells):
@@ -195,7 +172,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
                 breach = (AlarmSeverity.CRITICAL, f"PCI {pci}: {int(error_ind)} FAPI error indications")
             elif late_dl > 0 or late_ul > 0:
                 breach = (AlarmSeverity.MAJOR, f"PCI {pci}: {int(late_dl)} DL / {int(late_ul)} UL late HARQs")
-            self._update(L2_REALTIME_DEADLINE_MISS, f"sched-pci{pci}", breach)
+            self._update(AlarmId.L2_REALTIME_DEADLINE_MISS, f"sched-pci{pci}", breach)
 
     def _check_mac(self, mac) -> None:
         if not isinstance(mac, dict):
@@ -216,7 +193,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
                     AlarmSeverity.MAJOR,
                     f"PCI {pci}: MAC DL max slot latency {max_us:.0f} us ({max_slot_percent:.0f}% of the slot)",
                 )
-            self._update(L2_REALTIME_DEADLINE_MISS, f"mac-pci{pci}", breach)
+            self._update(AlarmId.L2_REALTIME_DEADLINE_MISS, f"mac-pci{pci}", breach)
 
     def _check_ofh(self, ofh) -> None:
         if not isinstance(ofh, dict):
@@ -228,7 +205,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
                 breach: Breach = None
                 if skipped > 0:
                     breach = (AlarmSeverity.MAJOR, f"{int(skipped)} OFH symbols skipped by the timing source")
-                self._update(FRONTHAUL_TIMING_VIOLATION, "ofh-timing", breach)
+                self._update(AlarmId.FRONTHAUL_TIMING_VIOLATION, "ofh-timing", breach)
         for cell in _dicts(ofh.get("cells")):
             self._check_ofh_cell(cell)
 
@@ -240,9 +217,9 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
 
         # missed rather than late: their own alarms
         missed_prach = _num(counters.pop("nof_missed_prach_occasions", None))
-        self._check_reception(PRACH_RECEPTION_FAILURE, pci, missed_prach, "PRACH occasions")
+        self._check_reception(AlarmId.PRACH_RECEPTION_FAILURE, pci, missed_prach, "PRACH occasions")
         missed_ul = _num(counters.pop("nof_missed_uplink_symbols", None))
-        self._check_reception(UL_RECEPTION_FAILURE, pci, missed_ul, "UL symbols")
+        self._check_reception(AlarmId.UL_RECEPTION_FAILURE, pci, missed_ul, "UL symbols")
 
         self._check_fh_timing(pci, _dict(ul.get("received_packets")), counters)
 
@@ -262,9 +239,9 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
                 problems.append(f"{name}={int(count)}")
 
         breach: Breach = (AlarmSeverity.MAJOR, f"PCI {pci}: " + ", ".join(problems)) if problems else None
-        self._update(FRONTHAUL_TIMING_VIOLATION, f"ofh-pci{pci}", breach)
+        self._update(AlarmId.FRONTHAUL_TIMING_VIOLATION, f"ofh-pci{pci}", breach)
 
-    def _check_reception(self, alarm_id: int, pci, missed: Optional[float], what: str) -> None:
+    def _check_reception(self, alarm_id: AlarmId, pci, missed: Optional[float], what: str) -> None:
         """PRACH occasions or UL symbols whose reception window closed without their packets: the
         O-RU's U-plane does not reach the DU (e.g. a misconfigured VLAN or eAxC), or not in time."""
         if missed is None:
@@ -284,7 +261,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
             name = amf.get("amf_name") or "AMF"
             breach: Breach = None if connected else (AlarmSeverity.MAJOR, f"{name} not connected")
             # the connection state is reported as is, not sampled: no debouncing
-            self._update(AMF_CONNECTION_LOSS, f"amf-{name}", breach, raise_consecutive=1, clear_consecutive=1)
+            self._update(AlarmId.AMF_CONNECTION_LOSS, f"amf-{name}", breach, raise_consecutive=1, clear_consecutive=1)
 
     def _check_ue_capacity(self, rrcs) -> None:
         if not isinstance(rrcs, dict) or self._thr.max_nof_ues <= 0:
@@ -303,7 +280,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
             breach = (AlarmSeverity.CRITICAL, f"{int(ues)} RRC connections, at the limit of {self._thr.max_nof_ues}")
         elif percent >= self._thr.ue_major_percent:
             breach = (AlarmSeverity.MAJOR, f"{int(ues)} RRC connections, {percent:.0f}% of {self._thr.max_nof_ues}")
-        self._update(UE_CAPACITY_NEAR_LIMIT, "cu-cp", breach)
+        self._update(AlarmId.UE_CAPACITY_NEAR_LIMIT, "cu-cp", breach)
 
     def _check_rrc_establishments(self, rrcs) -> None:
         if not isinstance(rrcs, dict):
@@ -314,7 +291,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
             failed = _counts(est.get("failed_rrc_connection_establishments"))
             if attempted is not None and failed is not None:
                 self._check_failures(
-                    RRC_ESTABLISHMENT_FAILURES,
+                    AlarmId.RRC_ESTABLISHMENT_FAILURES,
                     f"DU {du.get('gnb_du_id')}",
                     "RRC connection establishments",
                     counts=(sum(attempted.values()), failed),
@@ -331,7 +308,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
             failed = _counts(sessions.get("nof_pdu_sessions_failed_to_setup"))
             if requested is not None and failed is not None:
                 self._check_failures(
-                    PDU_SESSION_SETUP_FAILURES,
+                    AlarmId.PDU_SESSION_SETUP_FAILURES,
                     f"{amf.get('amf_name') or 'AMF'} {sessions.get('s-nssai', '')}".strip(),
                     "PDU session setups",
                     counts=(requested, failed),
@@ -340,7 +317,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
 
     def _check_failures(  # pylint: disable=too-many-arguments
         self,
-        alarm_id: int,
+        alarm_id: AlarmId,
         source: str,
         what: str,
         *,
@@ -385,7 +362,7 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
 
     def _update(  # pylint: disable=too-many-arguments
         self,
-        alarm_id: int,
+        alarm_id: AlarmId,
         source: str,
         breach: Breach,
         *,
@@ -414,18 +391,16 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         if (cond.active, cond.severity) != was:
             self._sync_alarm(alarm_id)
 
-    def _sync_alarm(self, alarm_id: int) -> None:
+    def _sync_alarm(self, alarm_id: AlarmId) -> None:
         active = {src: c for src, c in self._conditions[alarm_id].items() if c.active}
         if not active:
             logging.info("Metrics alarm %d cleared", alarm_id)
             self._alarm_mgr.clear_alarm(alarm_id, message="back to normal")
             return
         severity = max((c.severity for c in active.values()), key=_SEVERITY_RANK.__getitem__)
-        details = {"probable-cause": _PROBABLE_CAUSES[alarm_id]}
-        details.update({src: c.message for src, c in sorted(active.items())})
         self._alarm_mgr.set_alarm(
             alarm_id,
             severity=severity,
             message="; ".join(c.message for _, c in sorted(active.items())),
-            details=details,
+            details={src: c.message for src, c in sorted(active.items())},
         )
