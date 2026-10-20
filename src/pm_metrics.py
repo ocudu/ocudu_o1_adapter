@@ -183,7 +183,7 @@ def _check_metrics_version(result: Any) -> None:
 class PmMetrics:
     """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets or PM files."""
 
-    def __init__(self, state: AppState, profile: str = "gnb", pm_files: PmFiles | None = None):
+    def __init__(self, state: AppState, profile: str = "gnb", pm_files: Optional[PmFiles] = None):
         self._state = state
         self._profile = profile
         self._pm_files = pm_files

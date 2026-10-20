@@ -65,6 +65,7 @@ def meas_collec_xml(job_id: str, job: dict, profile: str, begin: datetime, end: 
 class PmFiles:
     """Collects samples of file-reporting PM jobs, writes the files and announces them over VES."""
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def __init__(self, state: AppState, ves, pm_dir: str, sftp_url: str, profile: str = "gnb"):
         self._state = state
         self._ves = ves
@@ -131,6 +132,7 @@ class PmFiles:
                         logging.debug("PM job %s: no samples between %s and %s, no file", jid, begin, end)
             await asyncio.sleep(1)
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def _publish(self, job_id: str, job: dict, begin: datetime, end: datetime, periods: list) -> None:
         """Write the file, announce it and drop expired files."""
         name = file_name(job_id, job["nf_instance_id"], begin, end)
