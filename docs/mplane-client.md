@@ -21,7 +21,7 @@ published O-RAN WG4 models and 3GPP tables.
 | Delay management | o-ran-delay-management | read + DU-side timing derivation |
 | Capability discovery | o-ran-module-cap, ietf-yang-library | read (RFC 8525 with RFC 7895 modules-state fallback) |
 | Supervision | o-ran-supervision | watchdog reset RPC + notification-driven supervise loop |
-| Performance management | o-ran-performance-management | measurement-object configuration (two-phase, `configure_perf_measurement`, CLI `--set_pm`); the adapter's resident session streams the `measurement-result-stats` results ([mplane-service.md](mplane-service.md)) |
+| Performance management | o-ran-performance-management | measurement-object configuration for the rx-window, transceiver, tx and epe groups (two-phase, `configure_perf_measurement`, CLI `--set_pm`); CLI `--get_pm` prints the `measurement-result-stats` results and the adapter's resident session streams them ([mplane-service.md](mplane-service.md)) |
 | Synchronization | o-ran-sync | status read, sync-LOCKED wait; ptp-config write where the O-RU permits it |
 | Fault management | o-ran-fm | active-alarm-list read (`get_active_alarms(strict=)`, CLI `--get_alarms`) and alarm-notif parsing (`fm_parsers`); the adapter's resident session consumes them |
 | Not implemented | software/file management, user management, certificates, trace/troubleshooting, ALD, beamforming | out of scope — use vendor tooling or the O-RU's own procedures |
@@ -238,6 +238,11 @@ why `--ru_role hybrid-odu` is refused together with `--ru_forward`.
 # keep the supervision session alive / configure PM / list the active alarms
 ./ru_controller.py --host <ru> ... --supervise
 ./ru_controller.py --host <ru> ... --set_pm
+
+# start every advertised measurement and print the results as "<metric> <value>"
+# lines each notification-interval (60 s) until Ctrl-C; --get_pm also feeds the
+# supervision watchdog, since subscribing puts the O-RU in supervised mode
+./ru_controller.py --host <ru> ... --set_pm --get_pm
 ./ru_controller.py --host <ru> ... --get_alarms
 ```
 

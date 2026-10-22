@@ -6,13 +6,37 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
 <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 <performance-measurement-objects xmlns="urn:o-ran:performance-management:1.0">
-    <rx-window-measurement-interval>{{ config.rx_window_interval }}</rx-window-measurement-interval>
-    <notification-interval>{{ config.notification_interval }}</notification-interval>
+{% if config.rx_window_objects %}    <rx-window-measurement-interval>{{ config.rx_window_interval | default(60) }}</rx-window-measurement-interval>
+{% endif %}{% if config.transceiver_objects %}    <transceiver-measurement-interval>{{ config.transceiver_interval | default(60) }}</transceiver-measurement-interval>
+{% endif %}{% if config.tx_objects %}    <tx-measurement-interval>{{ config.tx_interval | default(60) }}</tx-measurement-interval>
+{% endif %}{% if config.epe_objects %}    <epe-measurement-interval>{{ config.epe_interval | default(60) }}</epe-measurement-interval>
+{% endif %}    <notification-interval>{{ config.notification_interval | default(60) }}</notification-interval>
 {% for measurement_object in config.rx_window_objects %}    <rx-window-measurement-objects>
         <measurement-object>{{ measurement_object }}</measurement-object>
         <active>{{ config.pm_active }}</active>
         <object-unit>RU</object-unit>
         <report-info>COUNT</report-info>
     </rx-window-measurement-objects>
+{% endfor %}{% for measurement_object in config.transceiver_objects %}    <transceiver-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>{{ config.pm_active }}</active>
+        <report-info>MINIMUM</report-info>
+        <report-info>MAXIMUM</report-info>
+        <report-info>LATEST</report-info>
+        <object-unit>PORT_NUMBER</object-unit>
+    </transceiver-measurement-objects>
+{% endfor %}{% for measurement_object in config.tx_objects %}    <tx-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>{{ config.pm_active }}</active>
+        <object-unit>RU</object-unit>
+        <report-info>COUNT</report-info>
+    </tx-measurement-objects>
+{% endfor %}{% for measurement_object in config.epe_objects %}    <epe-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>{{ config.pm_active }}</active>
+        <report-info>MINIMUM</report-info>
+        <report-info>MAXIMUM</report-info>
+        <report-info>AVERAGE</report-info>
+    </epe-measurement-objects>
 {% endfor %}</performance-measurement-objects>
 </config>

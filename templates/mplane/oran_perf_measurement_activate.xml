@@ -10,5 +10,17 @@ SPDX-License-Identifier: BSD-3-Clause-Open-MPI
         <measurement-object>{{ measurement_object }}</measurement-object>
         <active>true</active>
     </rx-window-measurement-objects>
+{% endfor %}{% for measurement_object in config.transceiver_objects %}    <transceiver-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>true</active>
+    </transceiver-measurement-objects>
+{% endfor %}{% for measurement_object in config.tx_objects %}    <tx-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>true</active>
+    </tx-measurement-objects>
+{% endfor %}{% for measurement_object in config.epe_objects %}    <epe-measurement-objects>
+        <measurement-object>{{ measurement_object }}</measurement-object>
+        <active>true</active>
+    </epe-measurement-objects>
 {% endfor %}</performance-measurement-objects>
 </config>

@@ -477,24 +477,25 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         "RX_EARLY_C",
         "RX_LATE_C",
     )
+    # pm_config keys of the measurement-object groups the templates write
+    PM_OBJECT_KEYS = ("rx_window_objects", "transceiver_objects", "tx_objects", "epe_objects")
 
     def set_oran_perf_measurement(self, pm_config=None):
         """Activate O-RU performance measurements (o-ran-performance-management).
 
-        pm_config keys (all optional): rx_window_objects (measurement-object
-        names to activate as RU-level COUNT counters), rx_window_interval and
-        notification_interval (seconds). enable-file-upload is left untouched (it
-        defaults to false and o-ran-performance-management 2021-03-22 lacks it); results
-        are reported via measurement-result-stats notifications. Returns False
+        pm_config keys (all optional): rx_window_objects (RU-level COUNT,
+        default _DEFAULT_RX_WINDOW_OBJECTS), transceiver_objects (per PORT_NUMBER,
+        min/max/latest), tx_objects (RU-level COUNT), epe_objects (min/max/average),
+        each <group>_interval and notification_interval (seconds, default 60; a
+        group's interval is written only with objects). enable-file-upload is left
+        untouched (o-ran-performance-management 2021-03-22 lacks it). Returns False
         (nothing sent) when the role may not write o-ran-performance-management,
         True after both edits.
         """
         pm_config = pm_config or {}
-        rendered_config = {
-            "rx_window_objects": list(pm_config.get("rx_window_objects", self._DEFAULT_RX_WINDOW_OBJECTS)),
-            "rx_window_interval": pm_config.get("rx_window_interval", 60),
-            "notification_interval": pm_config.get("notification_interval", 60),
-        }
+        # the intervals pass through; the template defaults them to 60
+        rendered_config = {**pm_config, **{key: list(pm_config.get(key) or ()) for key in self.PM_OBJECT_KEYS}}
+        rendered_config["rx_window_objects"] = list(pm_config.get("rx_window_objects", self._DEFAULT_RX_WINDOW_OBJECTS))
         # Two-phase: configure the measurement objects while inactive, then
         # activate in a separate edit-config, so object parameter changes
         # never coincide with an active measurement.
@@ -523,31 +524,35 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
         converging on the objects the O-RU actually supports — so no per-RU
         object list is required. An rpc-error that names no configured object is
         not an object-support failure and propagates unchanged; transport
-        failures always propagate. Returns the list of active objects; [] means
-        the O-RU supported none or the write was skipped by role.
+        failures always propagate. Returns {pm_config key: active objects} for
+        the groups left with objects (PM_OBJECT_KEYS); {} means the O-RU
+        supported none or the write was skipped by role.
         """
         pm_config = dict(pm_config or {})
-        objects = list(pm_config.get("rx_window_objects", self._DEFAULT_RX_WINDOW_OBJECTS))
+        groups = {key: list(pm_config.get(key) or ()) for key in self.PM_OBJECT_KEYS}
+        groups["rx_window_objects"] = list(pm_config.get("rx_window_objects", self._DEFAULT_RX_WINDOW_OBJECTS))
         dropped: list = []
-        while objects:
+        while any(groups.values()):
             try:
-                if not self.set_oran_perf_measurement({**pm_config, "rx_window_objects": objects}):
-                    return []
+                if not self.set_oran_perf_measurement({**pm_config, **groups}):
+                    return {}
             except rpc_ops.RPCError as err:
-                rejected = _measurement_objects_in_error(err, objects)
+                # ponytail: TEMPERATURE (transceiver and epe) drops from both groups; match the error-path if it bites
+                rejected = _measurement_objects_in_error(err, sorted({obj for objs in groups.values() for obj in objs}))
                 if not rejected:
                     raise
                 dropped.extend(rejected)
-                objects = [obj for obj in objects if obj not in rejected]
+                groups = {key: [obj for obj in objs if obj not in rejected] for key, objs in groups.items()}
                 logging.info("O-RU rejected PM measurement object(s) %s; retrying without them", rejected)
                 continue
+            active = {key: objs for key, objs in groups.items() if objs}
             if dropped:
                 logging.warning(
-                    "PM configured with a reduced object set — O-RU rejected %s; active: %s", dropped, objects
+                    "PM configured with a reduced object set — O-RU rejected %s; active: %s", dropped, active
                 )
-            return objects
+            return active
         logging.warning("O-RU rejected every configured PM measurement object; PM inactive (rejected %s)", dropped)
-        return []
+        return {}
 
     def get_perf_measurement_config(self, operational=False):
         """The RU's performance-measurement config ({} when unset); operational includes the state data."""

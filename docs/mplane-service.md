@@ -193,6 +193,9 @@ tdd: {pattern_upload: true, carrier_binding: true}   # optional; both default to
                               # session would recycle and re-provision endlessly.
 activation: {state: ACTIVE, tolerate_reply_timeout: true}   # optional; these are the defaults
 pm: {rx_window_objects: [RX_ON_TIME, RX_EARLY, RX_LATE], rx_window_interval: 60, notification_interval: 60}   # optional; applied with --ru_pm
+                              # also transceiver_objects, tx_objects, epe_objects
+                              # ([] turns a group off) and transceiver_interval,
+                              # tx_interval, epe_interval
 ```
 
 `interface` is required even when the session acts as `hybrid-odu`:
@@ -337,16 +340,20 @@ at INFO.
   notification seam and on the cycle seam (after the provisioner and the fault
   bridge) with no flag of its own; `--ru_pm` makes the cycle step configure the
   O-RU: it writes and activates the measurement objects (two-phase, through
-  the client) from the provision profile's optional `pm` section —
-  `rx_window_objects`, `rx_window_interval`, `notification_interval`,
-  validated at startup, the notification interval never longer than the
-  measurement interval since the batched `multiple-*` lists are not parsed —
-  or the client's default set. An O-RU lists the
-  measurement objects it supports in the module's config-false
-  `measurement-capabilitites` container (its own spelling); when it exposes
-  rx-window ones, the bridge requests only those — all of them when the
-  profile names none, else the profile's set minus the unadvertised (logged)
-  — so the edit is not rejected first; the other advertised groups are logged.
+  the client) from the provision profile's optional `pm` section — object
+  lists and measurement intervals for the rx-window, transceiver, tx and epe
+  groups plus `notification_interval`, validated at startup, the
+  notification interval never longer than any measurement interval since
+  the batched `multiple-*` lists are not parsed — or the client's default
+  set (rx-window only). An O-RU lists the measurement objects it supports in
+  the module's config-false `measurement-capabilitites` container (its own
+  spelling); when it exposes any, the bridge requests per group only the
+  advertised ones — all of them when the profile names none for the group,
+  else the profile's set minus the unadvertised (logged) — so the edit is
+  not rejected first. Transceiver objects are measured per `PORT_NUMBER`
+  (minimum, maximum, latest), tx objects as RU-level counts, and epe objects
+  as minimum, maximum and average with the object-unit (a hardware class)
+  left to the O-RU.
   An O-RU exposing no capabilities gets the configured set: the client drops
   the objects it rejects and retries with the rest, and the bridge requests
   the set it converged on from the next cycle on, so the rejections happen
@@ -418,9 +425,11 @@ runs alongside those loops.
 - **Performance pushing without a job**: O-RU samples go northbound only to PM
   jobs the SMO configured through the DU-facing NETCONF config; under
   `--profile ru` there is no such config, so the stream is parsed and logged,
-  not pushed. Only rx-window measurement objects are ever configured — the
-  other groups an O-RU may advertise in `measurement-capabilitites` are parsed
-  when streamed, never written; the edit does not touch `enable-file-upload`
+  not pushed. Only the rx-window, transceiver, tx and epe groups are ever
+  configured — the other groups an O-RU may advertise in
+  `measurement-capabilitites` are parsed when streamed, never written; a
+  rejected object name shared by two groups (`TEMPERATURE`) is dropped from
+  both; the edit does not touch `enable-file-upload`
   (false by default, and absent from o-ran-performance-management 2021-03-22,
   whose O-RUs reject an edit that names it).
 - **Cell-driven carrier state**: the DU cell's administrative state does not

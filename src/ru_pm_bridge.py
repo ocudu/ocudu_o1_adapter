@@ -34,9 +34,11 @@ Table 6.5-1 the hybrid-odu role reads performance management but does not
 write it, so the client skips the write with one log line. An O-RU lists the
 measurement objects it supports in the module's config-false
 measurement-capabilitites container (its own spelling); when it does, only
-advertised rx-window objects are requested — all of them when the profile
-names none — so the edit is not rejected first and retried; an O-RU exposing
-no capabilities gets the configured set and the client's reject-and-retry.
+advertised rx-window, transceiver, tx-stats and epe objects are requested —
+all of a group's when the profile names none for it — so the edit is not
+rejected first and retried; an O-RU exposing no capabilities gets the
+configured set (rx-window defaults when unset) and the client's
+reject-and-retry.
 """
 
 import logging
@@ -64,8 +66,17 @@ _CAPABILITY_LISTS = {
     "tx-output-power-stats-objects": "tx-output-power",
     "ethernet-objects": "ethernet",
 }
-_RX_WINDOW_UNIT = "RU"  # the object-unit the measurement template requests
-_SKIP = object()  # _requested_objects: a capability list that leaves nothing to request
+# capability groups the measurement template writes -> their pm_config key
+_REQUESTED_GROUPS = {
+    "rx-window": "rx_window_objects",
+    "transceiver": "transceiver_objects",
+    "tx-stats": "tx_objects",
+    "epe": "epe_objects",
+}
+# the object-unit the template requests for rx-window and tx; the transceiver
+# and epe capability entries list no object-unit, so they never filter on it
+_OBJECT_UNIT = "RU"
+SKIP = object()  # requested_pm_config: a capability list that leaves nothing to request
 
 # Keys of the result lists below a measurement-object entry (the o-ran-pm-*
 # submodules); their values name the result. "name" is a key only there
@@ -185,6 +196,51 @@ def parse_measurement_stats(notification_xml):
     return samples
 
 
+def requested_pm_config(ru_config, pm_config):
+    """The measurement config to push: pm_config, narrowed to what the O-RU advertises.
+
+    An O-RU lists the measurement objects it supports in the config-false
+    measurement-capabilitites container; when it exposes any, each group the
+    template writes (rx-window, transceiver, tx-stats, epe) requests only
+    advertised objects — all of them when pm_config names none for the
+    group, else its set minus the unadvertised (logged) — so the edit is not
+    rejected first and then retried. An O-RU exposing no capabilities gets
+    pm_config as is — None for the client's defaults — and the client's
+    reject-and-retry (read non-strictly: a failed read counts as "none
+    exposed"). SKIP when the capability lists leave nothing to request.
+    """
+    capabilities = parse_measurement_capabilities(ru_config.get_perf_measurement_config(operational=True))
+    if not capabilities:
+        logging.info(
+            "O-RU exposes no measurement-capabilitites; requesting the configured set, learning from rejections"
+        )
+        return pm_config
+    pm_config = dict(pm_config or {})
+    logging.info(
+        "O-RU advertises measurement objects: %s",
+        ", ".join(f"{group} ({len(objects)})" for group, objects in capabilities.items()),
+    )
+    logging.debug("O-RU measurement capabilities: %s", capabilities)
+    for group, key in _REQUESTED_GROUPS.items():
+        supported = [
+            name for name, units in (capabilities.get(group) or {}).items() if not units or _OBJECT_UNIT in units
+        ]
+        requested = pm_config.get(key)
+        objects = supported if requested is None else [name for name in requested if name in supported]
+        if requested is not None and set(requested) - set(objects):
+            logging.info(
+                "%s measurement objects not advertised by the O-RU (unit %s), not requested: %s",
+                group,
+                _OBJECT_UNIT,
+                sorted(set(requested) - set(objects)),
+            )
+        pm_config[key] = objects
+    if not any(pm_config[key] for key in _REQUESTED_GROUPS.values()):
+        logging.warning("O-RU advertises none of the requested measurement objects; measurement configuration skipped")
+        return SKIP
+    return pm_config
+
+
 class RuPmBridge:
     """Stream O-RU performance measurements through the adapter's PM path."""
 
@@ -232,7 +288,7 @@ class RuPmBridge:
         requested as such from the next cycle on. The edits run without a
         watchdog feed: at most two per retry round, each bounded by the RPC
         timeout.
-        What is requested comes from _requested_objects.
+        What is requested comes from requested_pm_config.
         """
         try:
             advertised = ru_config.get_module_capabilities_map(strict=True)
@@ -244,60 +300,18 @@ class RuPmBridge:
                 "O-RU does not advertise %s in its yang-library; measurement configuration skipped", _PM_MODULE
             )
             return
-        pm_config = self._requested_objects(ru_config)
-        if pm_config is _SKIP:
+        pm_config = requested_pm_config(ru_config, self.pm_config)
+        if pm_config is SKIP:
             return
         try:
             active = ru_config.configure_perf_measurement(pm_config)
         except rpc_ops.RPCError as err:
             logging.warning("O-RU rejected the measurement configuration: %s", err)
             return
-        requested = (pm_config or {}).get("rx_window_objects")
-        if active and (requested is None or set(requested) != set(active)):
-            self.pm_config = {**(self.pm_config or {}), "rx_window_objects": list(active)}
-            logging.info("Measurement objects converged on %s; later cycles request exactly these", list(active))
-
-    def _requested_objects(self, ru_config):
-        """The measurement config to push: the profile's, narrowed to what the O-RU advertises.
-
-        An O-RU lists the measurement objects it supports in the config-false
-        measurement-capabilitites container; when it exposes rx-window ones,
-        only those are requested — all of them when the profile names none,
-        else the profile's set minus the unadvertised (logged) — so the edit
-        is not rejected first and then retried. An O-RU exposing no
-        capabilities gets the configured set as is — None for the client's
-        defaults — and the client's reject-and-retry (read non-strictly: a
-        failed read counts as "none exposed"). _SKIP when a capability list
-        leaves nothing to request.
-        """
-        capabilities = parse_measurement_capabilities(ru_config.get_perf_measurement_config(operational=True))
-        if not capabilities:
-            logging.info(
-                "O-RU exposes no measurement-capabilitites; requesting the configured set, learning from rejections"
-            )
-            return self.pm_config
-        pm_config = dict(self.pm_config or {})
-        logging.info(
-            "O-RU advertises measurement objects: %s",
-            ", ".join(f"{group} ({len(objects)})" for group, objects in capabilities.items()),
-        )
-        logging.debug("O-RU measurement capabilities: %s", capabilities)
-        supported = [
-            name
-            for name, units in (capabilities.get("rx-window") or {}).items()
-            if not units or _RX_WINDOW_UNIT in units
-        ]
-        requested = pm_config.get("rx_window_objects")
-        objects = supported if requested is None else [name for name in requested if name in supported]
-        if requested is not None and set(requested) - set(objects):
-            logging.info(
-                "Measurement objects not advertised by the O-RU (unit %s), not requested: %s",
-                _RX_WINDOW_UNIT,
-                sorted(set(requested) - set(objects)),
-            )
-        if not objects:
-            logging.warning(
-                "O-RU advertises none of the rx-window measurement objects; measurement configuration skipped"
-            )
-            return _SKIP
-        return {**pm_config, "rx_window_objects": objects}
+        if not active:
+            return
+        requested = {key: list((pm_config or {}).get(key) or ()) for key in _REQUESTED_GROUPS.values()}
+        converged = {key: active.get(key, []) for key in _REQUESTED_GROUPS.values()}
+        if converged != requested:
+            self.pm_config = {**(self.pm_config or {}), **converged}
+            logging.info("Measurement objects converged on %s; later cycles request exactly these", active)

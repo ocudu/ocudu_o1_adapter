@@ -30,10 +30,11 @@ from ncclient.transport import errors as transport_errors
 from ofh_config_builder import compute_frame_structure, compute_num_prb
 from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES, RuConfig
+from ru_pm_bridge import parse_measurement_stats, requested_pm_config, SKIP
 from ssh_algorithms import restrict_ssh_algorithms
 
 
-def supervise(ru_config, interval, guard, max_notifications=None):
+def supervise(ru_config, interval, guard, max_notifications=None, print_pm=False):
     """Keep an O-RU supervision session alive, driven by notifications.
 
     Subscribes on ru_config.supervision_manager — the session the watchdog reset
@@ -52,6 +53,10 @@ def supervise(ru_config, interval, guard, max_notifications=None):
 
     max_notifications: stop after handling this many supervision-notifications
     (None = run until the session fails). Intended for tests and bounded runs.
+    print_pm: print each measurement-result-stats notification to stdout as
+    "<metric> <value>" lines (ru_pm_bridge naming). It rides on this loop
+    because subscribing puts the O-RU in supervised mode, so the watchdog
+    must be fed while measurements are watched.
     """
     if ru_config.dry_run:
         logging.info("Dry run: skipping supervision loop")
@@ -69,7 +74,11 @@ def supervise(ru_config, interval, guard, max_notifications=None):
                 logging.warning("No supervision-notification within %ss; O-RU may be unresponsive", timeout)
                 continue
             if ET.fromstring(notification.notification_xml).find(".//" + supervision_tag) is None:
-                logging.debug("Ignoring non-supervision notification")
+                samples = parse_measurement_stats(notification.notification_xml) if print_pm else []
+                for sample in samples:
+                    print(f"{sample['name']} {sample['value']}", flush=True)
+                if not samples:
+                    logging.debug("Ignoring non-supervision notification")
                 continue
             logging.info("supervision-notification received; resetting watchdog")
             reply = ru_config.reset_supervision_watchdog(interval, guard)
@@ -121,7 +130,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("--set_full_config", action="store_true", help="Set full RU config")
     parser.add_argument(
-        "--set_pm", action="store_true", help="Activate the RU's fronthaul rx-window performance counters"
+        "--set_pm",
+        action="store_true",
+        help="Activate the RU's performance measurements: every rx-window, transceiver, tx-stats and epe object "
+        "it advertises in measurement-capabilitites (the rx-window defaults when it advertises none)",
+    )
+    parser.add_argument(
+        "--get_pm",
+        action="store_true",
+        help="Print the RU's measurement-result-stats as '<metric> <value>' lines until interrupted "
+        "(implies --supervise; pair with --set_pm to start the measurements)",
     )
 
     # IETF interface config
@@ -316,7 +334,9 @@ if __name__ == "__main__":
                 print(json.dumps(active_alarm))
 
         if args.set_pm:
-            ru_controller.configure_perf_measurement()
+            pm_config = requested_pm_config(ru_controller, None)
+            if pm_config is not SKIP:
+                logging.info("Active PM measurement objects: %s", ru_controller.configure_perf_measurement(pm_config))
 
         # Enable all base configs
         if args.set_full_config:
@@ -394,12 +414,14 @@ if __name__ == "__main__":
                 else:
                     logging.warning("Carriers not all READY (state is asynchronous): %s", summary)
 
-        if args.supervise:
-            supervise(ru_controller, args.supervision_interval, args.supervision_guard)
+        if args.supervise or args.get_pm:
+            supervise(ru_controller, args.supervision_interval, args.supervision_guard, print_pm=args.get_pm)
     except (OperationError, TimeoutExpiredError, ConnectionError, TimeoutError, transport_errors.TransportError):
         # Already logged at the raise site; preserve the CLI exit code. ncclient's
         # OperationError covers RPCError; TimeoutExpiredError is its reply timeout.
         sys.exit(1)
+    except KeyboardInterrupt:
+        pass  # the way out of --supervise / --get_pm
     finally:
         if session is not None:
             try:

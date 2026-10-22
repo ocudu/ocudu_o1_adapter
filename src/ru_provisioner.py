@@ -294,37 +294,41 @@ def _check_sections(config, path):
     _check_pm(pm or {}, path)
 
 
-_PM_KEYS = ("rx_window_objects", "rx_window_interval", "notification_interval")
+_PM_OBJECT_KEYS = ("rx_window_objects", "transceiver_objects", "tx_objects", "epe_objects")
+_PM_MEASUREMENT_INTERVALS = ("rx_window_interval", "transceiver_interval", "tx_interval", "epe_interval")
+_PM_KEYS = (*_PM_OBJECT_KEYS, *_PM_MEASUREMENT_INTERVALS, "notification_interval")
 _PM_OBJECT = re.compile(r"[A-Z0-9_]+")
 
 
 def _check_pm(pm, path):
     """The optional pm section: known keys, measurement-object names, positive intervals,
-    notification interval not longer than the measurement interval."""
+    notification interval not longer than any measurement interval."""
     unknown = sorted(set(pm) - set(_PM_KEYS))
     if unknown:
         raise ValueError(f"provision config {path}: pm has unknown keys {unknown}; known: {list(_PM_KEYS)}")
-    objects = pm.get("rx_window_objects")
-    if objects is not None and (
-        not isinstance(objects, list)
-        or not objects
-        or not all(isinstance(name, str) and _PM_OBJECT.fullmatch(name) for name in objects)
-    ):
-        raise ValueError(f"provision config {path}: pm.rx_window_objects must be a non-empty list of object names")
-    for key in _PM_KEYS[1:]:
+    for key in _PM_OBJECT_KEYS:
+        # [] turns a group off; rx_window_objects alone may not be empty, as before
+        objects = pm.get(key)
+        if objects is not None and (
+            not isinstance(objects, list)
+            or (key == "rx_window_objects" and not objects)
+            or not all(isinstance(name, str) and _PM_OBJECT.fullmatch(name) for name in objects)
+        ):
+            raise ValueError(f"provision config {path}: pm.{key} must be a list of object names")
+    for key in (*_PM_MEASUREMENT_INTERVALS, "notification_interval"):
         value = pm.get(key)
         if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
             raise ValueError(f"provision config {path}: pm.{key} must be a positive integer, not {value!r}")
-    # A notification interval longer than the measurement interval makes the
+    # A notification interval longer than a measurement interval makes the
     # O-RU batch the earlier intervals into the multiple-* lists, which the
-    # bridge does not parse; the client defaults (60/60) stand in for omitted keys.
-    rx_window = pm.get("rx_window_interval", 60)
+    # bridge does not parse; the client defaults (60) stand in for omitted keys.
     notification = pm.get("notification_interval", 60)
-    if notification > rx_window:
-        raise ValueError(
-            f"provision config {path}: pm.notification_interval ({notification}) must not exceed "
-            f"pm.rx_window_interval ({rx_window}); batched earlier intervals would be dropped"
-        )
+    for key in _PM_MEASUREMENT_INTERVALS:
+        if notification > pm.get(key, 60):
+            raise ValueError(
+                f"provision config {path}: pm.notification_interval ({notification}) must not exceed "
+                f"pm.{key} ({pm.get(key, 60)}); batched earlier intervals would be dropped"
+            )
 
 
 def _normalize_declarations(config, path):
