@@ -289,6 +289,11 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
             est = _dict(du.get("rrc_connection_establishment"))
             attempted = _counts(est.get("attempted_rrc_connection_establishments"))
             failed = _counts(est.get("failed_rrc_connection_establishments"))
+            if failed is None:
+                # older gNBs do not report the failures: those are the attempts not (yet) successful
+                successful = _counts(est.get("successful_rrc_connection_establishments"))
+                if attempted is not None and successful is not None:
+                    failed = {c: max(n - successful.get(c, 0.0), 0.0) for c, n in attempted.items()}
             if attempted is not None and failed is not None:
                 self._check_failures(
                     AlarmId.RRC_ESTABLISHMENT_FAILURES,

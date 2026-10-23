@@ -100,7 +100,7 @@ and malfunction conditions and raises them as FM alarms towards the SMO:
 |---|---|---|---|
 | 2001 | `AMF_CONNECTION_LOSS` | `cu-cp.ngaps.ngap[].connected` is false (no debouncing) | MAJOR |
 | 2005 | `UE_CAPACITY_NEAR_LIMIT` | peak RRC connections over all DUs ≥ `--metrics_ue_major` % of `--metrics_max_nof_ues` | MAJOR, CRITICAL at 100 % |
-| 2006 | `RRC_ESTABLISHMENT_FAILURES` | per DU: failed RRC connection establishments > `--metrics_rrc_fail_percent` % of the attempted ones, judged over at least `--metrics_rrc_min_attempts` attempts | MAJOR, CRITICAL when all failed |
+| 2006 | `RRC_ESTABLISHMENT_FAILURES` | per DU: failed RRC connection establishments (attempted − successful when the gNB does not report the failures) > `--metrics_rrc_fail_percent` % of the attempted ones, judged over at least `--metrics_rrc_min_attempts` attempts | MAJOR, CRITICAL when all failed |
 | 2008 | `PDU_SESSION_SETUP_FAILURES` | per AMF: failed PDU session setups > `--metrics_pdu_fail_percent` % of the requested ones, judged over at least `--metrics_pdu_min_attempts` requests | MAJOR, CRITICAL when all failed |
 | 3003 | `CPU_OVERLOAD` | `app_resource_usage.cpu_usage_percent` ≥ `--metrics_cpu_major` / `--metrics_cpu_critical` | MAJOR / CRITICAL |
 | 3004 | `MEMORY_OVERLOAD` | `app_resource_usage.mem_usage_percent` ≥ `--metrics_mem_major` / `--metrics_mem_critical` | MAJOR / CRITICAL |
