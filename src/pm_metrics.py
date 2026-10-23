@@ -20,6 +20,10 @@ import aiohttp
 
 from state import AppState
 
+# Major version of the gNB JSON metrics this adapter is written for, reported by the gNB in its
+# metrics_subscribe response. A different major version renamed or removed fields the adapter uses.
+SUPPORTED_METRICS_MAJOR_VERSION = 1
+
 # 1:1 gNB scalar -> 3GPP KPI rename + rescale (TS 28.554). Aggregated KPIs live in
 # _derived_kpis. Note: spec §6.4.2 spells "VirtualResUtilization" as "VirtualResUtilizaiton";
 # we emit the corrected form.
@@ -149,6 +153,23 @@ def _flatten_metrics(data: dict) -> list:
     return out
 
 
+def _check_metrics_version(result: Any) -> None:
+    """Compare the metrics version reported in the gNB's metrics_subscribe response with the supported one."""
+    version = result.get("metrics_version") if isinstance(result, dict) else None
+    if not isinstance(version, str):
+        logging.warning("gNB does not report a metrics version, assuming a gNB older than metrics versioning")
+        return
+    major = version.split(".")[0]
+    if major != str(SUPPORTED_METRICS_MAJOR_VERSION):
+        logging.warning(
+            "gNB metrics version %s is not supported (major version %d expected): metrics may be missing or misread",
+            version,
+            SUPPORTED_METRICS_MAJOR_VERSION,
+        )
+        return
+    logging.info("gNB metrics version %s", version)
+
+
 class PmMetrics:
     """Processes gNB WS metric payloads and O-RU samples, and pushes PM envelopes to stream targets."""
 
@@ -177,8 +198,14 @@ class PmMetrics:
             logging.error("WS non-JSON message: %s", msg)
             return
 
+        if not isinstance(data, dict):
+            logging.error("WS message is not a JSON object: %s", msg)
+            return
+
         if data.get("cmd"):
             logging.debug("WS command response: %s", data)
+            if data["cmd"] == "metrics_subscribe" and "error" not in data:
+                _check_metrics_version(data.get("result"))
             return
 
         for key in ("cu-cp", "du", "cells"):
