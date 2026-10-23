@@ -240,9 +240,10 @@ why `--ru_role hybrid-odu` is refused together with `--ru_forward`.
 ./ru_controller.py --host <ru> ... --set_pm
 
 # start every advertised measurement and print the results as "<metric> <value>"
-# lines each notification-interval (60 s) until Ctrl-C; --get_pm also feeds the
-# supervision watchdog, since subscribing puts the O-RU in supervised mode
-./ru_controller.py --host <ru> ... --set_pm --get_pm
+# lines each notification-interval (--pm-interval, default 60 s) until Ctrl-C;
+# --get_pm also feeds the supervision watchdog, since subscribing puts the O-RU
+# in supervised mode
+./ru_controller.py --host <ru> ... --set_pm --get_pm --pm-interval 10
 ./ru_controller.py --host <ru> ... --get_alarms
 ```
 

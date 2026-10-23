@@ -141,6 +141,13 @@ if __name__ == "__main__":
         help="Print the RU's measurement-result-stats as '<metric> <value>' lines until interrupted "
         "(implies --supervise; pair with --set_pm to start the measurements)",
     )
+    parser.add_argument(
+        "--pm-interval",
+        type=int,
+        default=60,
+        help="--set_pm measurement and notification interval in seconds (one value for every group, so the "
+        "O-RU never batches intervals into the multiple-* lists --get_pm does not print)",
+    )
 
     # IETF interface config
     parser.add_argument("--set_interface", action="store_true", help="Set IETF interface config")
@@ -334,7 +341,9 @@ if __name__ == "__main__":
                 print(json.dumps(active_alarm))
 
         if args.set_pm:
-            pm_config = requested_pm_config(ru_controller, None)
+            intervals = ("rx_window_interval", "transceiver_interval", "tx_interval", "epe_interval")
+            pm_config = dict.fromkeys((*intervals, "notification_interval"), args.pm_interval)
+            pm_config = requested_pm_config(ru_controller, pm_config)
             if pm_config is not SKIP:
                 logging.info("Active PM measurement objects: %s", ru_controller.configure_perf_measurement(pm_config))
 
