@@ -20,9 +20,10 @@ import aiohttp
 
 from state import AppState
 
-# Major version of the gNB JSON metrics this adapter is written for, reported by the gNB in its
-# metrics_subscribe response. A different major version renamed or removed fields the adapter uses.
-SUPPORTED_METRICS_MAJOR_VERSION = 1
+# Version (major, minor) of the gNB JSON metrics this adapter is written for, reported by the gNB in its
+# metrics_subscribe response: the major version must match (a different one renamed or removed fields),
+# the minor one is the oldest supported (a later one only added fields).
+SUPPORTED_METRICS_VERSION = (1, 0)
 
 # 1:1 gNB scalar -> 3GPP KPI rename + rescale (TS 28.554). Aggregated KPIs live in
 # _derived_kpis. Note: spec §6.4.2 spells "VirtualResUtilization" as "VirtualResUtilizaiton";
@@ -159,12 +160,19 @@ def _check_metrics_version(result: Any) -> None:
     if not isinstance(version, str):
         logging.warning("gNB does not report a metrics version, assuming a gNB older than metrics versioning")
         return
-    major = version.split(".")[0]
-    if major != str(SUPPORTED_METRICS_MAJOR_VERSION):
+    try:
+        major, minor = (int(v) for v in version.split("."))
+    except ValueError:
+        logging.warning("gNB metrics version %s is not of the form major.minor", version)
+        return
+    expected_major, min_minor = SUPPORTED_METRICS_VERSION
+    if major != expected_major or minor < min_minor:
         logging.warning(
-            "gNB metrics version %s is not supported (major version %d expected): metrics may be missing or misread",
+            "gNB metrics version %s is not supported (%d.%d or later %d.x expected): metrics may be missing or misread",
             version,
-            SUPPORTED_METRICS_MAJOR_VERSION,
+            expected_major,
+            min_minor,
+            expected_major,
         )
         return
     logging.info("gNB metrics version %s", version)
