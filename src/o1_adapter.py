@@ -334,6 +334,7 @@ async def orchestrator(args, alarm_mgr, ves_messages):
         MetricsThresholds(
             raise_consecutive=args.metrics_raise_consecutive,
             clear_consecutive=args.metrics_clear_consecutive,
+            cpu_cores=args.metrics_cpu_cores or float(os.cpu_count() or 1),
             cpu_major_percent=args.metrics_cpu_major,
             cpu_critical_percent=args.metrics_cpu_critical,
             mem_major_percent=args.metrics_mem_major,
@@ -719,6 +720,13 @@ if __name__ == "__main__":
         type=int,
         default=3,
         help="Number of consecutive clean metric reports before clearing a metrics alarm",
+    )
+    parser.add_argument(
+        "--metrics_cpu_cores",
+        type=float,
+        default=0.0,
+        help="CPUs the gNB may use, which alarm 3003 measures the CPU usage against: the size of its cpuset, "
+        "or its CPU limit in k8s (0 = the CPUs of the adapter's host)",
     )
     parser.add_argument("--metrics_cpu_major", type=float, default=85.0, help="CPU usage (%%) raising alarm 3003 MAJOR")
     parser.add_argument(

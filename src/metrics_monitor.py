@@ -45,6 +45,7 @@ class MetricsThresholds:
 
     raise_consecutive: int = 3
     clear_consecutive: int = 3
+    cpu_cores: float = 1.0  # CPUs the gNB may use (cpuset size or k8s CPU limit)
     cpu_major_percent: float = 85.0
     cpu_critical_percent: float = 95.0
     mem_major_percent: float = 85.0
@@ -153,8 +154,15 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
         if not isinstance(usage, dict):
             return
         cpu = _num(usage.get("cpu_usage_percent"))
-        if cpu is not None:
-            breach = self._percent_breach(cpu, self._thr.cpu_major_percent, self._thr.cpu_critical_percent, "CPU")
+        if cpu is not None and self._thr.cpu_cores > 0:
+            # the gNB reports its CPU time in % of one core (up to 100% per core it keeps busy):
+            # scale it to the cores it may use
+            breach = self._percent_breach(
+                cpu / self._thr.cpu_cores,
+                self._thr.cpu_major_percent,
+                self._thr.cpu_critical_percent,
+                f"CPU ({self._thr.cpu_cores:g} cores)",
+            )
             self._update(AlarmId.CPU_OVERLOAD, "app", breach)
         mem = _num(usage.get("mem_usage_percent"))
         if mem is not None:
