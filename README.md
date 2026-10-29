@@ -110,8 +110,9 @@ and malfunction conditions and raises them as FM alarms towards the SMO:
 | 3010 | `UL_RECEPTION_FAILURE` | per cell: any UL symbol whose reception window closed without its packet (e.g. a misconfigured VLAN or UL eAxC on the O-RU, or packets arriving too late) | MAJOR |
 
 An alarm is raised after `--metrics_raise_consecutive` breaching reports and cleared after
-`--metrics_clear_consecutive` clean ones (3 each by default). It escalates at once, and only a change of state or
-severity is sent northbound. The affected cells and the probable cause go in the alarm's `additionalInformation`.
+`--metrics_clear_consecutive` clean ones (3 each by default). Its severity changes alike: it escalates after
+`--metrics_raise_consecutive` reports above it and de-escalates after `--metrics_clear_consecutive` reports below
+it. Only a change of state or severity is sent northbound. The affected cells and the probable cause go in the alarm's `additionalInformation`.
 The RRC and PDU session counters are cumulative in the gNB; the adapter works on their increase between reports.
 An alarm only fires if the gNB reports its metrics: enable the scheduler, MAC, OFH, CU-CP and resource-usage
 metric layers in the gNB's `metrics` configuration.

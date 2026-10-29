@@ -10,9 +10,12 @@ Each gNB component reports on its own period and in its own WS message (cells, d
 cu-cp, app_resource_usage), with counters holding the delta of one report period. Every
 message is checked against a set of conditions; one alarm may be fed by several of them
 (e.g. one per cell). A condition turns active after `raise_consecutive` breaching reports
-and inactive after `clear_consecutive` clean ones; the alarm is raised while any of its
-conditions is active, at the highest severity among them. A report lacking a field (its
-metric layer is disabled in the gNB) leaves the condition untouched.
+and inactive after `clear_consecutive` clean ones. Its severity is debounced alike: it
+escalates after `raise_consecutive` reports above it and de-escalates after
+`clear_consecutive` reports below it, so a metric hovering around a threshold does not
+flap the severity. The alarm is raised while any of its conditions is active, at the
+highest severity among them. A report lacking a field (its metric layer is disabled in
+the gNB) leaves the condition untouched.
 """
 
 import logging
@@ -24,6 +27,7 @@ from alarm_defs import AlarmId
 from alarm_manager import AlarmManager, AlarmSeverity
 
 _SEVERITY_RANK = {
+    AlarmSeverity.CLEARED: 0,
     AlarmSeverity.WARNING: 1,
     AlarmSeverity.MINOR: 2,
     AlarmSeverity.MAJOR: 3,
@@ -82,13 +86,19 @@ def _dicts(value) -> list:
 
 @dataclass
 class _Condition:
-    """Debounce state of one condition feeding an alarm."""
+    """Debounce state of one condition feeding an alarm: its (severity, message), CLEARED while
+    inactive, and the run of consecutive reports at another severity that may shift it."""
 
-    breaches: int = 0
-    cleans: int = 0
-    active: bool = False
     severity: AlarmSeverity = AlarmSeverity.CLEARED
     message: str = ""
+    shifts: int = 0
+    shift_severity: AlarmSeverity = AlarmSeverity.CLEARED  # of the run, the closest to severity
+    shift_message: str = ""
+
+    @property
+    def active(self) -> bool:
+        """Whether the condition holds its alarm raised."""
+        return self.severity != AlarmSeverity.CLEARED
 
 
 @dataclass
@@ -376,24 +386,32 @@ class MetricsMonitor:  # pylint: disable=too-few-public-methods
     ) -> None:
         """Feed one report's outcome for (alarm_id, source) and sync the alarm on a change.
 
-        Only a change of the active state or severity goes northbound: the message of a
-        breach carries per-report counts and is refreshed with the next such change.
+        Only a change of the severity (CLEARED while inactive) goes northbound: the message of
+        a breach carries per-report counts and is refreshed with the next such change.
         """
         cond = self._conditions[alarm_id].setdefault(source, _Condition())
-        was = (cond.active, cond.severity)
-        if breach:
-            cond.breaches += 1
-            cond.cleans = 0
-            if cond.active or cond.breaches >= (raise_consecutive or self._thr.raise_consecutive):
-                cond.active = True
-                cond.severity, cond.message = breach
+        severity, message = breach or (AlarmSeverity.CLEARED, "")
+        if severity == cond.severity:
+            cond.shifts = 0
+            cond.message = message
+            return
+
+        up = _SEVERITY_RANK[severity] > _SEVERITY_RANK[cond.severity]
+        if cond.shifts and (_SEVERITY_RANK[cond.shift_severity] > _SEVERITY_RANK[cond.severity]) == up:
+            cond.shifts += 1
+            # a run alternating e.g. MAJOR and CRITICAL above WARNING shifts to MAJOR only
+            closest = min if up else max
+            if closest(severity, cond.shift_severity, key=_SEVERITY_RANK.__getitem__) == severity:
+                cond.shift_severity, cond.shift_message = severity, message
         else:
-            cond.cleans += 1
-            cond.breaches = 0
-            if cond.active and cond.cleans >= (clear_consecutive or self._thr.clear_consecutive):
-                cond.active = False
-                cond.severity, cond.message = AlarmSeverity.CLEARED, ""
-        if (cond.active, cond.severity) != was:
+            cond.shifts, cond.shift_severity, cond.shift_message = 1, severity, message
+
+        if up:
+            needed = raise_consecutive or self._thr.raise_consecutive
+        else:
+            needed = clear_consecutive or self._thr.clear_consecutive
+        if cond.shifts >= needed:
+            cond.severity, cond.message, cond.shifts = cond.shift_severity, cond.shift_message, 0
             self._sync_alarm(alarm_id)
 
     def _sync_alarm(self, alarm_id: AlarmId) -> None:
