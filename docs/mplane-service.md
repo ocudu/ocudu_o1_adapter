@@ -387,7 +387,7 @@ the stream is parsed and logged but nothing is pushed.
 ```
 python3 src/o1_adapter.py --profile ru --ru_supervise \
     --ru_netconf_host <ru> --ru_netconf_port 830 \
-    --ru_netconf_username <user> --ru_netconf_password <pass> \
+    --ru_netconf_username <user> --ru_netconf_password_file <file> \
     [--ru_provision_config ru.yaml --ru_sync_timeout 300 --ru_interface_timeout 300] [--ru_role hybrid-odu] [--ru_pm] \
     [--ru_callhome --ru_callhome_bind 0.0.0.0 --ru_callhome_port 4334] \
     [--ru_supervision_interval 60 --ru_supervision_guard 10] [--rpc_log FILE]
@@ -404,6 +404,7 @@ runs alongside those loops.
 |---|---|---|
 | `--ru_supervise` | off | own a resident supervised Mplane session |
 | `--ru_netconf_host/_port/_username/_password` | 10.10.0.192/830/—/— | O-RU NETCONF endpoint (the host keeps the adapter's existing default and is not dialed with `--ru_callhome`; credentials required with `--ru_supervise` or `--ru_forward`) |
+| `--ru_netconf_password_file` | none | file holding the O-RU NETCONF password, in place of `--ru_netconf_password`, which every user of the host can read on the process command line; trailing line breaks are not part of the password; the two are refused together |
 | `--ru_callhome` | off | accept the O-RU's call-home (RFC 8071) instead of dialing out; needs the O-RU to advertise `:interleave`; requires `--ru_supervise` |
 | `--ru_callhome_bind` / `--ru_callhome_port` | 0.0.0.0 / 4334 | call-home listener address and port |
 | `--ru_supervision_interval` / `--ru_supervision_guard` | 60 / 10 | o-ran-supervision timers, seconds (uint16-validated) |

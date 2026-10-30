@@ -47,6 +47,15 @@ To reset the health status send the following command to the server:
 
 An example Docker and k8s integration is provided.
 
+### Passwords from files
+
+A password on the command line can be read by every user of the host (`ps`,
+`/proc/<pid>/cmdline`). Each password option has a `_file` form that reads it
+from a file instead, such as a mounted Kubernetes Secret: `--netconf_password_file`,
+`--ru_netconf_password_file` and `--ves_password_file`. Trailing line breaks are
+not part of the password; giving both forms of one password, or a missing or
+empty file, is a usage error at startup.
+
 ### Verifying the NETCONF server's SSH host key
 
 The adapter accepts whatever SSH host key the server presents unless `--netconf_hostkey_verify`

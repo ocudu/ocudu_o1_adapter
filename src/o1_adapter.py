@@ -36,6 +36,7 @@ from alarm_manager import AlarmEvent, AlarmManager
 from config_manager import ConfigManager
 from metrics_monitor import MetricsMonitor, MetricsThresholds
 from mplane_session import du_facing_loops_enabled, MplaneSession
+from password_files import read_password_files
 from pm_files import PmFiles
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
@@ -444,6 +445,12 @@ if __name__ == "__main__":
         help="SSH pass",
     )
     parser.add_argument(
+        "--netconf_password_file",
+        type=str,
+        default=None,
+        help="File holding the SSH pass (instead of --netconf_password, which shows on the process command line)",
+    )
+    parser.add_argument(
         "--netconf_hostkey_verify",
         action="store_true",
         help="Verify the NETCONF server's SSH host key against --netconf_known_hosts",
@@ -499,6 +506,12 @@ if __name__ == "__main__":
         type=str,
         default="",
         help="RU NETCONF password",
+    )
+    parser.add_argument(
+        "--ru_netconf_password_file",
+        type=str,
+        default=None,
+        help="File holding the RU NETCONF password (instead of --ru_netconf_password)",
     )
     parser.add_argument(
         "--ru_datastore",
@@ -655,6 +668,12 @@ if __name__ == "__main__":
         type=str,
         default="sample1",
         help="VES password",
+    )
+    parser.add_argument(
+        "--ves_password_file",
+        type=str,
+        default=None,
+        help="File holding the VES password (instead of --ves_password)",
     )
     parser.add_argument(
         "--ves_scheme",
@@ -817,6 +836,8 @@ if __name__ == "__main__":
         # ru profile doesn't render a yaml; ConfigManager won't read this.
         cmd_args.template = f"{cmd_args.profile}.yaml"
 
+    read_password_files(parser, cmd_args)
+
     if cmd_args.ru_forward or cmd_args.ru_supervise:
         missing_ru_args = []
         # the flag carries a default, so only an explicitly emptied host is
@@ -826,7 +847,7 @@ if __name__ == "__main__":
         if not cmd_args.ru_netconf_username:
             missing_ru_args.append("--ru_netconf_username")
         if not cmd_args.ru_netconf_password:
-            missing_ru_args.append("--ru_netconf_password")
+            missing_ru_args.append("--ru_netconf_password (or --ru_netconf_password_file)")
         if missing_ru_args:
             parser.error(
                 "Missing required RU NETCONF arguments when --ru_forward/--ru_supervise is set: "
