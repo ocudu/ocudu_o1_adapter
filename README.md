@@ -47,6 +47,11 @@ To reset the health status send the following command to the server:
 
 An example Docker and k8s integration is provided.
 
+With `--ru_supervise`, `GET /ru/status` reports the O-RU as the M-plane session
+sees it and `GET /ru/ready` answers 200 only once the session is supervised and
+the carriers are active (503 otherwise), for a probe of whatever must wait for
+the O-RU; see [docs/mplane-service.md](docs/mplane-service.md).
+
 ### Passwords from files
 
 A password on the command line can be read by every user of the host (`ps`,

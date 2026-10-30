@@ -42,6 +42,12 @@ else to the l2vlan interface carrying processing.vlan, and waits up to
 interface_timeout_s for that interface to exist before pushing anything. A
 cycle that never sees it pushes nothing; the next connect cycle tries again.
 
+Each cycle's outcome is recorded in the application state (ru_provision) for
+the adapter's /ru/status and /ru/ready endpoints: the phase reached, the last
+sync-state read and the carrier receipt. ru_status() turns it, with the
+session's own state, into the readiness a DU waits for before streaming: a
+supervised session whose carriers are activated and all READY.
+
 Not covered here (deliberately): re-activation after an availability-state
 FAULTY episode clears mid-session — carriers deactivated by the O-RU are
 re-activated on the next session cycle (an O-RU leaving FAULTY after a
@@ -63,6 +69,36 @@ from ofh_config_builder import (
 )
 from xml_utils import ensure_list
 
+# ru_provision phases. A transport failure leaves PROVISIONING standing: the
+# session recycles and the next connect cycle starts over.
+PHASE_NOT_PROVISIONED = "NOT_PROVISIONED"  # no connect cycle has provisioned yet (the AppState default)
+PHASE_PROVISIONING = "PROVISIONING"  # this cycle's provisioning is running
+PHASE_INTERFACE_PENDING = "INTERFACE_PENDING"  # hybrid-odu: the VLAN interface never appeared; nothing pushed
+PHASE_INACTIVE = "INACTIVE"  # provisioned, carriers written INACTIVE by the profile
+PHASE_SYNC_NOT_LOCKED = "SYNC_NOT_LOCKED"  # provisioned, carriers left inactive: no sync-state LOCKED in time
+PHASE_CARRIERS_NOT_READY = "CARRIERS_NOT_READY"  # activated, not every carrier READY in time
+PHASE_ACTIVE = "ACTIVE"  # activated, every carrier READY
+PHASE_REJECTED = "REJECTED"  # the O-RU rejected an edit or a strict read (rpc-error)
+
+
+def ru_status(session_state, ru_provision, provisioning):
+    """The O-RU's readiness as the adapter reports it, from the session's
+    state and the provisioner's outcome.
+
+    Ready means the M-plane session is SUPERVISED and, when the adapter
+    provisions the O-RU, this cycle activated the carriers and every one of
+    them reported READY. Without --ru_provision_config the carriers are not
+    the adapter's, so a supervised session is ready.
+    """
+    session = session_state.get("ru_mplane_state", "DISCONNECTED")
+    supervised = session == "SUPERVISED"
+    ready = supervised and (not provisioning or ru_provision.get("phase") == PHASE_ACTIVE)
+    return {
+        "session": session,
+        "provisioning": dict(ru_provision) if provisioning else None,
+        "ready": ready,
+    }
+
 
 class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Apply a full-config dict to the O-RU on each connect cycle."""
@@ -75,12 +111,26 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         *,
         carrier_ready_timeout_s=120,
         interface_timeout_s=300,
+        app_state=None,
     ):
         self.provision_config = provision_config
         self.sync_timeout_s = sync_timeout_s
         self.sync_poll_s = sync_poll_s
         self.carrier_ready_timeout_s = carrier_ready_timeout_s
         self.interface_timeout_s = interface_timeout_s
+        # where each cycle's outcome is recorded (AppState.ru_provision); None records nothing
+        self.app_state = app_state
+        self._last_sync_state = None
+
+    def _record(self, phase, carriers=None):
+        if self.app_state is None:
+            return
+        self.app_state.ru_provision = {
+            "phase": phase,
+            "sync_state": self._last_sync_state,
+            "carriers": dict(carriers or {}),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
 
     def provision(self, ru_config):
         """Provision the O-RU, activating carriers only once sync is LOCKED.
@@ -95,9 +145,12 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         logged loudly and the session is left supervised; the next connect
         cycle re-provisions.
         """
+        self._last_sync_state = None
+        self._record(PHASE_PROVISIONING)
         try:
             config = self._resolve_interface(ru_config)
             if config is None:
+                self._record(PHASE_INTERFACE_PENDING)
                 return
             ru_config.set_full_config(config, skip_activation=True)
             if self._activation_state() != "ACTIVE":
@@ -105,21 +158,25 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
                 # precondition, no receipt to wait for
                 ru_config.activate_full_config(config)
                 logging.info("O-RU provisioned; carriers written INACTIVE by configuration")
+                self._record(PHASE_INACTIVE)
                 return
             if not self._wait_for_sync_locked(ru_config):
                 logging.warning(
                     "O-RU not sync-LOCKED within %ss; provisioned but carriers left inactive", self.sync_timeout_s
                 )
+                self._record(PHASE_SYNC_NOT_LOCKED)
                 return
             ru_config.activate_full_config(config)
             states = self._wait_for_carriers_ready(ru_config)
             receipt = ", ".join(f"{name}={state}" for name, state in sorted(states.items())) or "none exposed"
             if states and all(state == "READY" for state in states.values()):
                 logging.info("O-RU provisioned; carrier activation receipt: %s", receipt)
+                self._record(PHASE_ACTIVE, states)
             else:
                 logging.warning(
                     "Carriers not all READY within %ss of activation: %s", self.carrier_ready_timeout_s, receipt
                 )
+                self._record(PHASE_CARRIERS_NOT_READY, states)
         except rpc_ops.RPCError as err:
             # edit_config already logged the per-node NETCONF error detail; do
             # not re-raise — recycling on a rejected edit is a guaranteed
@@ -130,6 +187,7 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
                 "Detail: %s",
                 err,
             )
+            self._record(PHASE_REJECTED)
 
     def _resolve_interface(self, ru_config):
         """The config to push this cycle, its processing element bound to the VLAN interface.
@@ -212,7 +270,8 @@ class RuProvisioner:  # pylint: disable=too-few-public-methods,too-many-instance
         """
         deadline = time.monotonic() + self.sync_timeout_s
         while True:
-            if ru_config.get_sync_status(strict=True).get("sync_state") == "LOCKED":
+            self._last_sync_state = ru_config.get_sync_status(strict=True).get("sync_state")
+            if self._last_sync_state == "LOCKED":
                 return True
             remaining = deadline - time.monotonic()
             if remaining <= 0:

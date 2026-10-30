@@ -382,6 +382,45 @@ the collector tells O-RU samples apart by their `ru.` prefix only. Without a
 job — always the case under `--profile ru`, which runs no DU-facing loop —
 the stream is parsed and logged but nothing is pushed.
 
+## Readiness (`/ru/status`, `/ru/ready`)
+
+Whatever must wait for the O-RU — a DU that starts its fronthaul stream only
+onto active carriers — reads the adapter's HTTP port (5000). With
+`--ru_supervise` two routes report the O-RU as the session sees it:
+
+```
+$ curl -s http://localhost:5000/ru/status
+{"session": "SUPERVISED", "provisioning": {"phase": "ACTIVE", "sync_state": "LOCKED",
+ "carriers": {"Rx-Array-Carrier-00": "READY", "Tx-Array-Carrier-00": "READY"},
+ "updated_at": "2026-10-30T12:20:05Z"}, "ready": true}
+```
+
+`/ru/status` always answers 200; `/ru/ready` answers the same body with 200
+when `ready` is true and 503 otherwise, so a startup or readiness probe can
+use it as is. `session` is the session's lifecycle phase (DISCONNECTED,
+CONNECTING, SUPERVISED, DEGRADED). `provisioning` is the provisioner's
+outcome for the current connect cycle, `null` without
+`--ru_provision_config`:
+
+| `phase` | Meaning |
+|---|---|
+| `NOT_PROVISIONED` | no connect cycle has provisioned yet |
+| `PROVISIONING` | this cycle's provisioning is running; also what a transport failure leaves until the next cycle |
+| `INTERFACE_PENDING` | `hybrid-odu`: the management plane's VLAN interface never appeared; nothing pushed |
+| `INACTIVE` | provisioned, carriers written INACTIVE by the profile |
+| `SYNC_NOT_LOCKED` | provisioned, carriers left inactive: no sync-state LOCKED within `--ru_sync_timeout` |
+| `CARRIERS_NOT_READY` | activated, not every carrier READY in time |
+| `ACTIVE` | activated, every carrier READY |
+| `REJECTED` | the O-RU rejected an edit or a strict read (rpc-error) |
+
+`sync_state` is the last sync-state the provisioner read and `carriers` the
+activation receipt. Ready means a SUPERVISED session and, when the adapter
+provisions the O-RU, an `ACTIVE` cycle; without `--ru_provision_config` the
+carriers are not the adapter's, and a supervised session is ready. The
+outcome is the provisioner's view at the end of its cycle: a carrier the O-RU
+deactivates later, or a sync loss, shows in the fault bridge's alarms, not
+here.
+
 ## Running it
 
 ```

@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Any, Dict
 
 
 @dataclass()
@@ -29,5 +29,10 @@ class AppState:
 
     pm_metrics_queue: asyncio.Queue = asyncio.Queue()  # (target, envelope) tuples awaiting HTTP push
     pm_jobs: Dict[str, dict] = field(default_factory=dict)  # PerfMetricJob id -> attrs
+
+    # the O-RU provisioner's outcome for the current connect cycle (ru_provisioner.ru_status reads it)
+    ru_provision: Dict[str, Any] = field(
+        default_factory=lambda: {"phase": "NOT_PROVISIONED", "sync_state": None, "carriers": {}, "updated_at": None}
+    )
 
     restart_req = False

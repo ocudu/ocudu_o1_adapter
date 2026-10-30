@@ -45,7 +45,7 @@ from ru_config import ROLE_SUDO, ROLES
 from ru_fm_bridge import RuFaultBridge
 from ru_forwarder import RuForwarder
 from ru_pm_bridge import RuPmBridge
-from ru_provisioner import load_provision_config, RuProvisioner
+from ru_provisioner import load_provision_config, ru_status, RuProvisioner
 from ssh_algorithms import restrict_ssh_algorithms
 from state import AppState
 from ves import VesMessages
@@ -60,13 +60,16 @@ RETRY_INTERVAL = 5  # seconds
 NETCONF_SSH_CONFIG = "/tmp/netconf_ssh_config"
 
 
-def configure_app(state: AppState, auto_heal=False):
+def configure_app(state: AppState, auto_heal=False, ru_supervised=False, ru_provisioning=False):
     """
     Configures the given Flask application with specific routes for health checks and state management.
 
     Args:
         app (Flask): The Flask application instance to configure.
         auto_heal (bool, optional): Flag to enable automatic healing by resetting the restart request. Defaults to False
+        ru_supervised (bool, optional): The adapter holds a supervised M-plane session (--ru_supervise); adds the
+            /ru routes.
+        ru_provisioning (bool, optional): The adapter provisions the O-RU (--ru_provision_config).
 
     Returns:
         Flask: The configured Flask application instance.
@@ -77,6 +80,10 @@ def configure_app(state: AppState, auto_heal=False):
         /status (GET): Provides a simple health check of the O1 adapter,
             always returning success if the service is reachable.
         /restarted (POST): Resets the restart request state and returns a success response.
+        /ru/status (GET): With --ru_supervise, the O-RU as the M-plane session sees it: the session state, the
+            provisioner's outcome for this connect cycle and whether the O-RU is ready (ru_provisioner.ru_status).
+        /ru/ready (GET): The same body, 200 when the O-RU is ready and 503 otherwise, for a startup or
+            readiness probe of whatever must wait for the O-RU (a DU starting its fronthaul stream).
     """
 
     @app.route("/config-healthy")
@@ -101,6 +108,17 @@ def configure_app(state: AppState, auto_heal=False):
     def reset_state():
         state.restart_req = False
         return jsonify({"success": "OK"})
+
+    if ru_supervised:
+
+        @app.route("/ru/status", methods=["GET"])
+        def get_ru_status():
+            return jsonify(ru_status(state.session_state, state.ru_provision, ru_provisioning))
+
+        @app.route("/ru/ready", methods=["GET"])
+        def get_ru_ready():
+            status = ru_status(state.session_state, state.ru_provision, ru_provisioning)
+            return jsonify(status), 200 if status["ready"] else 503
 
     return app
 
@@ -360,6 +378,7 @@ async def orchestrator(args, alarm_mgr, ves_messages):
                 args.ru_provision,
                 sync_timeout_s=args.ru_sync_timeout,
                 interface_timeout_s=args.ru_interface_timeout,
+                app_state=state,
             )
             mplane_session.register_cycle_handler(provisioner.provision)
         # after the provisioner on the cycle seam: reconcile reads the
@@ -378,7 +397,7 @@ async def orchestrator(args, alarm_mgr, ves_messages):
         mplane_session.register_notification_handler(ru_pm_bridge.handle_notification)
         mplane_session.register_cycle_handler(ru_pm_bridge.on_cycle)
 
-    configure_app(state, args.autoheal)
+    configure_app(state, args.autoheal, ru_supervised=args.ru_supervise, ru_provisioning=bool(args.ru_provision))
 
     # Skip the DU-facing loops (NETCONF session toward the DU, PM websocket)
     # when managing an O-RU — see mplane_session.du_facing_loops_enabled.
