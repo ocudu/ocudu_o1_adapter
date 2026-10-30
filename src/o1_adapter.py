@@ -426,11 +426,11 @@ async def orchestrator(args, alarm_mgr, ves_messages):
     )
 
 
-def start_flask():
+def start_flask(port=5000):
     """Run Flask in a background thread."""
     app.run(
         host="0.0.0.0",
-        port=5000,
+        port=port,
         debug=False,
         use_reloader=False,
     )
@@ -641,6 +641,12 @@ if __name__ == "__main__":
         type=str,
         default="/tmp/config.yaml",
         help="Config filename",
+    )
+    parser.add_argument(
+        "--http_port",
+        type=int,
+        default=5000,
+        help="TCP port of the adapter's HTTP endpoints (/status, /config-healthy, /ru/status, ...)",
     )
     parser.add_argument(
         "-a",
@@ -857,6 +863,9 @@ if __name__ == "__main__":
 
     read_password_files(parser, cmd_args)
 
+    if not 1 <= cmd_args.http_port <= 65535:
+        parser.error("--http_port must be 1..65535 (a TCP port)")
+
     if cmd_args.ru_forward or cmd_args.ru_supervise:
         missing_ru_args = []
         # the flag carries a default, so only an explicitly emptied host is
@@ -968,7 +977,7 @@ if __name__ == "__main__":
     )
 
     # Let's go
-    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread = threading.Thread(target=start_flask, args=(cmd_args.http_port,), daemon=True)
     flask_thread.start()
 
     # As a container's PID 1 the kernel drops signals without a handler, so SIGTERM would be

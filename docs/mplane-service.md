@@ -385,7 +385,7 @@ the stream is parsed and logged but nothing is pushed.
 ## Readiness (`/ru/status`, `/ru/ready`)
 
 Whatever must wait for the O-RU — a DU that starts its fronthaul stream only
-onto active carriers — reads the adapter's HTTP port (5000). With
+onto active carriers — reads the adapter's HTTP port (5000, or `--http_port`). With
 `--ru_supervise` two routes report the O-RU as the session sees it:
 
 ```

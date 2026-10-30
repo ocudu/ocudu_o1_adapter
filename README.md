@@ -31,7 +31,7 @@ Make sure a Netconf server is running an can be reached over `localhost` on port
 
 `$ python3 src/o1_adapter`
 
-The application will listen on all available network interfaces including `localhost`.
+The application will listen on all available network interfaces including `localhost`, on port 5000 (`--http_port` sets another, e.g. when two adapters share a host's network).
 
 In another console use `curl` to check the config healthiness:
 
