@@ -280,7 +280,7 @@ def extract_cells_config(raw_config):
             logging.warning(f"Couldn't extract OCUDU OFH config extensions: {e}")
 
         # build DU cell struct to overwrite common cell_cfg fields with individual values
-        new_du_cell = {}
+        new_du_cell: Dict[str, Any] = {}
 
         try:
             ssb_fields = {}
@@ -506,6 +506,15 @@ def extract_cells_config(raw_config):
             )
         except KeyError as e:
             logging.warning(f"Couldn't extract NRCellDU standard attributes: {e}")
+        # cellLocalId is the cell's sector_id: the gNB derives the NCI from gnb_id and sector_id the
+        # same way 3GPP TS 38.300 derives it from gNBId and cellLocalId, so the datastore's value is
+        # what keeps two cells of one DU apart.
+        local_id = cell["attributes"].get("cellLocalId") if isinstance(cell.get("attributes"), dict) else None
+        if local_id is not None:
+            try:
+                new_du_cell.update({"sector_id": int(local_id)})
+            except (TypeError, ValueError):
+                logging.warning(f"NRCellDU cellLocalId {local_id!r} is not an integer; no sector_id rendered")
         du_cell_config.append(new_du_cell)
     return ofh_cell_config, du_cell_config
 
