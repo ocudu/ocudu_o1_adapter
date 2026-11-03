@@ -29,8 +29,14 @@ Every section is optional on both sides: only the network functions the scaffold
 YAML carries are overlaid, so a CU-UP split YAML paired with the CU-UP seed needs no GNBDUFunction at
 all -- pick the seed that matches the split. Covered so far:
 
-  - GNBDUFunction: NRCellDU standard attributes, all ocudu_nrcelldu_* channel/base extensions, the
-    per-cell OFH extension, and RRMPolicyRatio (from cell_cfg)
+  - the gNB identity: gnb_id / gnb_id_bit_length onto every function the YAML configures (the
+    gnb-id-consistency deviation wants them equal), gnb_du_id, ran_node_name and gnb_cu_up_id onto
+    their function
+  - GNBDUFunction: NRCellDU standard attributes (sector_id <-> cellLocalId included), all
+    ocudu_nrcelldu_* channel/base extensions, the per-cell OFH extension, RRMPolicyRatio (from
+    cell_cfg), and the standalone DU's F1 endpoints: f1ap.addrs / bind_addrs -> EP_F1C remote /
+    local address, f1u.socket[0].bind_addr -> EP_F1U local address, f1u.bind_port / peer_port -> the
+    EP_F1U extension
   - GNBCUCPFunction: the NG-C / E1 / F1-C endpoints, the flat amf.* knobs, and a tracking area's
     tac -> nRTAC, plmn -> pLMNId and tai_slice_support_list -> RRMPolicyRatio members
   - GNBCUUPFunction: the E1 / NG-U / F1-U endpoints (incl. the F1-U GTP-U ports) and test_mode
@@ -38,7 +44,7 @@ all -- pick the seed that matches the split. Covered so far:
     ru_dummy, hal, remote_control), all routed back to the function extension they came from
 
 cu_cp.mobility is the one section with a matching function that is still not inverted; it and the
-top-level sections in _UNINVERTED_SECTIONS are kept as the scaffold has them and reported.
+top-level sections in _UNINVERTED_SECTIONS (test_mode) are kept as the scaffold has them and reported.
 """
 
 import argparse
@@ -73,8 +79,23 @@ _FLAT_SECTIONS = {
     "remote_control": "ocudu_remote_control_extensions",
 }
 
+# Top-level identity keys (what extract_top_level_config renders) -> the function attribute each
+# comes from. gNBId / gNBIdLength are read off whichever function carries them, so the inverse
+# writes them onto every function the YAML configures.
+_IDENTITY_KEYS = {
+    "gnb_id": (None, "gNBId"),
+    "gnb_id_bit_length": (None, "gNBIdLength"),
+    "gnb_du_id": ("GNBDUFunction", "gNBDUId"),
+    "ran_node_name": ("GNBCUCPFunction", "gNBCUName"),
+    "gnb_cu_up_id": ("GNBCUUPFunction", "gNBCUUPId"),
+}
+
 # Top-level YAML sections this module knows how to invert; anything else is reported and left alone.
-_HANDLED_SECTIONS = ("cells", "ru_ofh", "cell_cfg", "cu_cp", "cu_up", "log", "pcap", "metrics") + tuple(_FLAT_SECTIONS)
+_HANDLED_SECTIONS = (
+    ("cells", "ru_ofh", "cell_cfg", "cu_cp", "cu_up", "log", "pcap", "metrics", "f1ap", "f1u")
+    + tuple(_FLAT_SECTIONS)
+    + tuple(_IDENTITY_KEYS)
+)
 
 # Every function declares ocudu_metrics_extensions, but each with its own periodicity and layer leaves
 # (metrics-extensions.yang), so the metrics block is routed leaf by leaf. Leaf names are unique across
@@ -106,8 +127,6 @@ _MOBILITY_NODES = ("ocudu_gnbcucpfunction_mobility_extensions", "NRCellCU")
 # carries keeps its node exactly as the scaffold has it, and a section the YAML never mentions is dropped
 # like any other redundant subtree. Either way the config still renders back to the YAML it came from.
 _UNINVERTED_SECTIONS = {
-    "f1ap": "EP_F1C",
-    "f1u": "EP_F1U",
     "test_mode": "ocudu_gnbdufunction_testmode_extensions",
     "e2": "ocudu_e2_extensions",
 }
@@ -131,6 +150,7 @@ _STANDARD_ATTRS = {
     "tac": "nRTAC",
     "dl_arfcn": "arfcnDL",
     "channel_bandwidth_MHz": "bSChannelBwDL",
+    "sector_id": "cellLocalId",
 }
 
 # YAML per-cell channel key -> ocudu_nrcelldu_extensions sub-container. Note the tdd rename.
@@ -349,6 +369,37 @@ def overlay_du(yaml_cfg, gnbdu, written):
             if isinstance(rrm, dict):
                 _overlay_rrm_policy(rrm.setdefault("attributes", {}), cell_cfg, written)
 
+    _overlay_du_f1(yaml_cfg, gnbdu, written)
+
+
+def _overlay_du_f1(yaml_cfg, gnbdu, written):
+    """Overlay a standalone DU's top-level f1ap / f1u blocks onto EP_F1C / EP_F1U.
+
+    The DU is the F1-C client (the forward path renders f1ap.addrs from EP_F1C remoteAddress and
+    f1ap.bind_addrs from its localAddress) and binds F1-U itself (f1u.socket[].bind_addr from EP_F1U
+    localAddress, the GTP-U ports from the EP_F1U extension). A gnb/cu YAML has no top-level F1
+    blocks: F1 is in-process there.
+    """
+    f1ap = yaml_cfg.get("f1ap") or {}
+    if f1ap:
+        _overlay_endpoint(gnbdu, "EP_F1C", written, f1ap.get("bind_addrs"), f1ap.get("addrs"))
+        for key in f1ap:
+            if key not in ("addrs", "bind_addrs"):
+                logging.warning("Ignoring f1ap.%s: the forward path renders addrs and bind_addrs only", key)
+
+    f1u = yaml_cfg.get("f1u") or {}
+    if f1u:
+        attrs = _overlay_endpoint(gnbdu, "EP_F1U", written, _bind_addr(f1u, "f1u"))
+        ports = {key: f1u[key] for key in ("bind_port", "peer_port") if key in f1u}
+        if ports and attrs is not None:
+            if isinstance(attrs.get("ocudu_ep_f1u_extensions"), dict):
+                _merge(attrs, "ocudu_ep_f1u_extensions", ports, written)
+            else:
+                logging.warning("Scaffold EP_F1U has no ocudu_ep_f1u_extensions; dropping %s", ", ".join(ports))
+        for key in f1u:
+            if key not in ("socket", "bind_port", "peer_port"):
+                logging.warning("Ignoring f1u.%s: the forward path renders socket and the GTP-U ports only", key)
+
 
 def _overlay_endpoint(function, ep_key, written, bind_addr=None, peer_addr=None):
     """Overlay bind/peer addresses onto an EP_* element; returns its attributes, or None if absent."""
@@ -534,6 +585,28 @@ def _function_extensions(managed_element):
         function = managed_element.get(func_key)
         if isinstance(function, dict) and isinstance(function.get(ext_key), dict):
             yield function[ext_key]
+
+
+def _overlay_identity(managed_element, yaml_cfg, functions, written):
+    """Overlay the top-level identity keys onto the function attributes they are rendered from.
+
+    `functions` names the functions the YAML configures: gnb_id / gnb_id_bit_length go onto every one
+    of them (the forward path reads them off whichever function it finds first, and the
+    gnb-id-consistency deviation wants them equal), a function-specific id onto its own function
+    only -- and only when the YAML configures that function, so the identity never keeps a function
+    alive that the YAML never touched.
+    """
+    for key, (function, attribute) in _IDENTITY_KEYS.items():
+        if key not in yaml_cfg:
+            continue
+        targets = functions if function is None else [function] if function in functions else []
+        if not targets:
+            logging.warning("Ignoring %s: the YAML configures no %s", key, function)
+            continue
+        for name in targets:
+            node = managed_element.get(name)
+            if isinstance(node, dict):
+                _write(node.setdefault("attributes", {}), attribute, _scalar_to_text(yaml_cfg[key]), written)
 
 
 def _overlay_log(managed_element, log_cfg, written):
@@ -745,8 +818,6 @@ def overlay(yaml_cfg, scaffold, minimal=True):
     du_cfg = any(key in yaml_cfg for key in ("cells", "ru_ofh", "cell_cfg"))
     cu_cp = yaml_cfg.get("cu_cp") or {}
     cu_up = yaml_cfg.get("cu_up") or {}
-    log_cfg = yaml_cfg.get("log")
-    pcap_cfg = yaml_cfg.get("pcap")
     written: set = set()
 
     overlaid = []
@@ -768,15 +839,12 @@ def overlay(yaml_cfg, scaffold, minimal=True):
             raise ValueError("YAML carries a cu_up config but the scaffold has no ManagedElement/GNBCUUPFunction")
         overlay_cuup(cu_up, gnbcuup, written)
         overlaid.append("GNBCUUPFunction")
-    if log_cfg:
-        _overlay_log(managed_element, log_cfg, written)
-        overlaid.append("log")
-    if pcap_cfg:
-        _overlay_pcap(managed_element, pcap_cfg, written)
-        overlaid.append("pcap")
-    if yaml_cfg.get("metrics"):
-        _overlay_metrics(managed_element, yaml_cfg["metrics"], written)
-        overlaid.append("metrics")
+    _overlay_identity(managed_element, yaml_cfg, [name for name in overlaid if name.startswith("GNB")], written)
+    overlaid.extend(key for key in _IDENTITY_KEYS if key in yaml_cfg)
+    for section, overlay_section in (("log", _overlay_log), ("pcap", _overlay_pcap), ("metrics", _overlay_metrics)):
+        if yaml_cfg.get(section):
+            overlay_section(managed_element, yaml_cfg[section], written)
+            overlaid.append(section)
     overlaid.extend(_overlay_flat_sections(managed_element, yaml_cfg, written))
 
     if not overlaid:
