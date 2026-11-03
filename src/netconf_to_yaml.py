@@ -519,13 +519,26 @@ def extract_cells_config(raw_config):
     return ofh_cell_config, du_cell_config
 
 
+def _first_cell_rrm_policy(raw_config):
+    """The RRMPolicyRatio attributes of the DU's first cell.
+
+    cell_cfg (plmn, tac, slicing) is one block for the whole DU, so it is read off one cell:
+    the first, which is also the only one when NRCellDU is a single element. A multi-cell DU
+    parses as a list, which the dict lookup used here before raised a TypeError on.
+    """
+    cells = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]
+    if isinstance(cells, list):
+        if len(cells) > 1:
+            logging.debug(f"{len(cells)} cells; cell_cfg is read off the first one's RRMPolicyRatio")
+        cells = cells[0]
+    return cells["RRMPolicyRatio"]["attributes"]
+
+
 def extract_cell_config(raw_config, du_cells=None):
     """Build the common cell_cfg subtree (tac/plmn/slicing) from the DU RRMPolicyRatio."""
     cell_cfg = {}
     try:
-        rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"][
-            "attributes"
-        ]
+        rrm_policy_config = _first_cell_rrm_policy(raw_config)
 
         plmn = rrm_policy_config["rRMPolicyMemberList"]["mcc"] + rrm_policy_config["rRMPolicyMemberList"]["mnc"]
 
@@ -552,7 +565,7 @@ def extract_cell_config(raw_config, du_cells=None):
             ],
         }
 
-    except (KeyError, ValueError) as e:
+    except (KeyError, TypeError, ValueError) as e:
         logging.warning(f"Couldn't extract OCUDU RRM policy config: {e}")
 
     return cell_cfg
@@ -638,9 +651,7 @@ def extract_rrm_policy_ratio_config(raw_config):
     """Build the RRM policy ratio payload sent as a runtime update to the gNB."""
     cfg = {}
     try:
-        rrm_policy_config = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["NRCellDU"]["RRMPolicyRatio"][
-            "attributes"
-        ]
+        rrm_policy_config = _first_cell_rrm_policy(raw_config)
 
         # Build config subtree
         cfg = {
@@ -658,7 +669,7 @@ def extract_rrm_policy_ratio_config(raw_config):
             "dedicated_ratio": int(rrm_policy_config["rRMPolicyDedicatedRatio"]),
         }
 
-    except (KeyError, ValueError) as e:
+    except (KeyError, TypeError, ValueError) as e:
         logging.warning(f"Couldn't extract OCUDU RRM policy config: {e}")
 
     return cfg
