@@ -54,6 +54,160 @@ YANG_LIBRARY_NS = "urn:ietf:params:xml:ns:yang:ietf-yang-library"
 
 
 # pylint: disable=too-many-instance-attributes,logging-fstring-interpolation,too-many-arguments,too-many-positional-arguments
+
+
+def build_template_context(raw_config, profile):
+    """The template context of one profile's YAML config, from a NETCONF get-config dict.
+
+    Everything write_full_config renders comes from here; the same context renders a config
+    offline (render_yaml), which is what makes the datastore -> YAML direction testable without
+    a server.
+    """
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    top_level_config = extract_top_level_config(raw_config)
+    ofh_cell_config, du_cell_config = extract_cells_config(raw_config)
+    cell_config = extract_cell_config(raw_config, du_cell_config)
+    cucp_config = extract_cucp_config(raw_config, du_cell_config)
+    cuup_config = extract_cuup_config(raw_config)
+    # NTNFunction is a ManagedElement-level IOC, so the satellites it defines are shared by every
+    # cell and render as the top-level ntn block rather than per-cell.
+    ntn_satellites = extract_ntn_satellites(raw_config)
+
+    # DU F1 addresses (standalone 'du' app only; gnb/cu wire F1 in-process). The DU is the
+    # F1-C client: EP_F1C remoteAddress -> f1ap.addrs, localAddress -> f1ap.bind_addrs. The DU's
+    # own F1-U bind address comes from EP_F1U localAddress -> f1u.socket[].bind_addr.
+    f1ap_config = {}
+    f1u_config = {}
+    if profile == "du":
+        try:
+            ep_f1c = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1C"]["attributes"]
+            f1ap_config = {
+                "addrs": ep_f1c["remoteAddress"],
+                "bind_addrs": ep_f1c["localAddress"]["ipAddress"],
+            }
+        except KeyError as e:
+            logging.warning(f"Couldn't extract DU F1-C config: {e}")
+        try:
+            ep_f1u = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1U"]["attributes"]
+            f1u_config = {"socket": [{"bind_addr": ep_f1u["localAddress"]["ipAddress"]}]}
+            # Optional GTP-U bind/peer UDP ports (OCUDU EP_F1U extension). When absent the
+            # gNB applies its own default (2152), so only emit them when explicitly set.
+            ports = ep_f1u.get("ocudu_ep_f1u_extensions") or {}
+            if "bind_port" in ports:
+                f1u_config["bind_port"] = ports["bind_port"]
+            if "peer_port" in ports:
+                f1u_config["peer_port"] = ports["peer_port"]
+        except KeyError as e:
+            logging.warning(f"Couldn't extract DU F1-U config: {e}")
+
+    # Function extensions (DU/CU-CP/CU-UP). testmode/hal/remote_control live only on
+    # the DU; log lives on any function (first-wins); pcap entries are merged across
+    # all functions; metrics_extensions is now per-function and gets merged
+    testmode_config = {"enabled": False}
+    log_config: Dict[str, Any] = {}
+    hal_config = {}
+    metrics_config: Dict[str, Any] = {}
+    expert_phy_config = {}
+    expert_execution_config = {}
+    remote_control_config = {}
+    pcap_config: Dict[str, Any] = {}
+    ru_dummy_config = {}
+    ru_sdr_config = {}
+    e2_config: Dict[str, Any] = {}
+    du_config: Dict[str, Any] = {}
+
+    managed_element = raw_config.get("data", {}).get("ManagedElement", {})
+    for func_key, ext_key in (
+        ("GNBDUFunction", "ocudu_gnbdufunction_extensions"),
+        ("GNBCUCPFunction", "ocudu_gnbcucpfunction_extensions"),
+        ("GNBCUUPFunction", "ocudu_gnbcuupfunction_extensions"),
+    ):
+        try:
+            ext = managed_element[func_key][ext_key]
+        except (KeyError, TypeError):
+            continue
+
+        testmode = ext.get("ocudu_gnbdufunction_testmode_extensions")
+        if testmode is not None:
+            testmode_config = testmode
+        hal = ext.get("ocudu_hal_extensions")
+        if hal is not None:
+            hal_config = hal
+        expert_phy = ext.get("ocudu_expert_phy_extensions")
+        if expert_phy is not None:
+            expert_phy_config = expert_phy
+        expert_execution = ext.get("ocudu_expert_execution_extensions")
+        if expert_execution is not None:
+            expert_execution_config = expert_execution
+        remote = ext.get("ocudu_remote_control_extensions")
+        if remote is not None:
+            remote_control_config = remote
+        ru_dummy = ext.get("ocudu_ru_dummy_extensions")
+        if ru_dummy is not None:
+            ru_dummy_config = ru_dummy
+        ru_sdr = ext.get("ocudu_ru_sdr_extensions")
+        if ru_sdr is not None:
+            ru_sdr_config = ru_sdr
+        # Each function brings its enable_*_e2 leaf; the shared RIC connection leaves sit on the
+        # CU-CP when there is one (YANG 'when' removes them from DU/CU-UP), so a plain merge
+        # yields the gNB 'e2' section.
+        e2_config.update(ext.get("ocudu_e2_extensions") or {})
+        # The CU-UP has its own warn_on_drop (cu_up.warn_on_drop), so only the DU's maps to du.*.
+        if func_key == "GNBDUFunction" and "warn_on_drop" in ext:
+            du_config["warn_on_drop"] = ext["warn_on_drop"]
+
+        if not log_config:
+            log = ext.get("ocudu_log_extensions")
+            if log is not None:
+                log_config = log
+
+        metrics = ext.get("ocudu_metrics_extensions")
+        if metrics is not None:
+            for key, value in metrics.items():
+                if key in ("periodicity", "layers") and isinstance(value, dict):
+                    metrics_config.setdefault(key, {}).update(value)
+                else:
+                    metrics_config[key] = value
+
+        pcap = ext.get("ocudu_pcap_extensions") or {}
+        pcap_config.update(pcap)
+    for key in ("addrs", "bind_addrs"):
+        if key in e2_config:
+            # Quoted: PyYAML cannot parse a plain '::1' inside a flow sequence.
+            e2_config[key] = json.dumps(ensure_list(e2_config[key]))
+
+    return {
+        "top_level_config": top_level_config,
+        "ofh_cells": ofh_cell_config,
+        "du_cells": du_cell_config,
+        "cucp_config": cucp_config,
+        "cuup_config": cuup_config,
+        "testmode_config": testmode_config,
+        "log_config": log_config,
+        "hal_config": hal_config,
+        "expert_phy_config": expert_phy_config,
+        "expert_execution_config": expert_execution_config,
+        "metrics_config": metrics_config,
+        "remote_control_config": remote_control_config,
+        "pcap_config": pcap_config,
+        "cell_config": cell_config,
+        "ntn_satellites": ntn_satellites,
+        "ru_dummy_config": ru_dummy_config,
+        "ru_sdr_config": ru_sdr_config,
+        "e2_config": e2_config,
+        "du_config": du_config,
+        "f1ap_config": f1ap_config,
+        "f1u_config": f1u_config,
+    }
+
+
+def render_yaml(raw_config, profile, template_filename, template_dir="templates/"):
+    """Render one profile's YAML config from a NETCONF get-config dict (no file is written)."""
+    environment = Environment(loader=FileSystemLoader(template_dir))
+    template = environment.get_template(template_filename)
+    return template.render(**build_template_context(raw_config, profile))
+
+
 class ConfigManager:
     """
     ConfigManager is responsible for managing and updating the configuration of a gNB / CU / DU.
@@ -344,146 +498,9 @@ class ConfigManager:
             self._enqueue_ru_forward_update(raw_xml)
             return True
 
-        top_level_config = extract_top_level_config(raw_config)
-        ofh_cell_config, du_cell_config = extract_cells_config(raw_config)
-        cell_config = extract_cell_config(raw_config, du_cell_config)
-        cucp_config = extract_cucp_config(raw_config, du_cell_config)
-        cuup_config = extract_cuup_config(raw_config)
-        # NTNFunction is a ManagedElement-level IOC, so the satellites it defines are shared by every
-        # cell and render as the top-level ntn block rather than per-cell.
-        ntn_satellites = extract_ntn_satellites(raw_config)
-
-        # DU F1 addresses (standalone 'du' app only; gnb/cu wire F1 in-process). The DU is the
-        # F1-C client: EP_F1C remoteAddress -> f1ap.addrs, localAddress -> f1ap.bind_addrs. The DU's
-        # own F1-U bind address comes from EP_F1U localAddress -> f1u.socket[].bind_addr.
-        f1ap_config = {}
-        f1u_config = {}
-        if self._profile == "du":
-            try:
-                ep_f1c = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1C"]["attributes"]
-                f1ap_config = {
-                    "addrs": ep_f1c["remoteAddress"],
-                    "bind_addrs": ep_f1c["localAddress"]["ipAddress"],
-                }
-            except KeyError as e:
-                logging.warning(f"Couldn't extract DU F1-C config: {e}")
-            try:
-                ep_f1u = raw_config["data"]["ManagedElement"]["GNBDUFunction"]["EP_F1U"]["attributes"]
-                f1u_config = {"socket": [{"bind_addr": ep_f1u["localAddress"]["ipAddress"]}]}
-                # Optional GTP-U bind/peer UDP ports (OCUDU EP_F1U extension). When absent the
-                # gNB applies its own default (2152), so only emit them when explicitly set.
-                ports = ep_f1u.get("ocudu_ep_f1u_extensions") or {}
-                if "bind_port" in ports:
-                    f1u_config["bind_port"] = ports["bind_port"]
-                if "peer_port" in ports:
-                    f1u_config["peer_port"] = ports["peer_port"]
-            except KeyError as e:
-                logging.warning(f"Couldn't extract DU F1-U config: {e}")
-
-        # Function extensions (DU/CU-CP/CU-UP). testmode/hal/remote_control live only on
-        # the DU; log lives on any function (first-wins); pcap entries are merged across
-        # all functions; metrics_extensions is now per-function and gets merged
-        testmode_config = {"enabled": False}
-        log_config: Dict[str, Any] = {}
-        hal_config = {}
-        metrics_config: Dict[str, Any] = {}
-        expert_phy_config = {}
-        expert_execution_config = {}
-        remote_control_config = {}
-        pcap_config: Dict[str, Any] = {}
-        ru_dummy_config = {}
-        ru_sdr_config = {}
-        e2_config: Dict[str, Any] = {}
-        du_config: Dict[str, Any] = {}
-
-        managed_element = raw_config.get("data", {}).get("ManagedElement", {})
-        for func_key, ext_key in (
-            ("GNBDUFunction", "ocudu_gnbdufunction_extensions"),
-            ("GNBCUCPFunction", "ocudu_gnbcucpfunction_extensions"),
-            ("GNBCUUPFunction", "ocudu_gnbcuupfunction_extensions"),
-        ):
-            try:
-                ext = managed_element[func_key][ext_key]
-            except (KeyError, TypeError):
-                continue
-
-            testmode = ext.get("ocudu_gnbdufunction_testmode_extensions")
-            if testmode is not None:
-                testmode_config = testmode
-            hal = ext.get("ocudu_hal_extensions")
-            if hal is not None:
-                hal_config = hal
-            expert_phy = ext.get("ocudu_expert_phy_extensions")
-            if expert_phy is not None:
-                expert_phy_config = expert_phy
-            expert_execution = ext.get("ocudu_expert_execution_extensions")
-            if expert_execution is not None:
-                expert_execution_config = expert_execution
-            remote = ext.get("ocudu_remote_control_extensions")
-            if remote is not None:
-                remote_control_config = remote
-            ru_dummy = ext.get("ocudu_ru_dummy_extensions")
-            if ru_dummy is not None:
-                ru_dummy_config = ru_dummy
-            ru_sdr = ext.get("ocudu_ru_sdr_extensions")
-            if ru_sdr is not None:
-                ru_sdr_config = ru_sdr
-            # Each function brings its enable_*_e2 leaf; the shared RIC connection leaves sit on the
-            # CU-CP when there is one (YANG 'when' removes them from DU/CU-UP), so a plain merge
-            # yields the gNB 'e2' section.
-            e2_config.update(ext.get("ocudu_e2_extensions") or {})
-            # The CU-UP has its own warn_on_drop (cu_up.warn_on_drop), so only the DU's maps to du.*.
-            if func_key == "GNBDUFunction" and "warn_on_drop" in ext:
-                du_config["warn_on_drop"] = ext["warn_on_drop"]
-
-            if not log_config:
-                log = ext.get("ocudu_log_extensions")
-                if log is not None:
-                    log_config = log
-
-            metrics = ext.get("ocudu_metrics_extensions")
-            if metrics is not None:
-                for key, value in metrics.items():
-                    if key in ("periodicity", "layers") and isinstance(value, dict):
-                        metrics_config.setdefault(key, {}).update(value)
-                    else:
-                        metrics_config[key] = value
-
-            pcap = ext.get("ocudu_pcap_extensions") or {}
-            pcap_config.update(pcap)
-
-        for key in ("addrs", "bind_addrs"):
-            if key in e2_config:
-                # Quoted: PyYAML cannot parse a plain '::1' inside a flow sequence.
-                e2_config[key] = json.dumps(ensure_list(e2_config[key]))
-
         # Render config file
         try:
-            environment = Environment(loader=FileSystemLoader("templates/"))
-            template = environment.get_template(self.template_filename)
-            content = template.render(
-                top_level_config=top_level_config,
-                ofh_cells=ofh_cell_config,
-                du_cells=du_cell_config,
-                cucp_config=cucp_config,
-                cuup_config=cuup_config,
-                testmode_config=testmode_config,
-                log_config=log_config,
-                hal_config=hal_config,
-                expert_phy_config=expert_phy_config,
-                expert_execution_config=expert_execution_config,
-                metrics_config=metrics_config,
-                remote_control_config=remote_control_config,
-                pcap_config=pcap_config,
-                cell_config=cell_config,
-                ntn_satellites=ntn_satellites,
-                ru_dummy_config=ru_dummy_config,
-                ru_sdr_config=ru_sdr_config,
-                e2_config=e2_config,
-                du_config=du_config,
-                f1ap_config=f1ap_config,
-                f1u_config=f1u_config,
-            )
+            content = render_yaml(raw_config, self._profile, self.template_filename)
         except jinja2_exceptions.UndefinedError as e:
             logging.error(f"Template rendering error: {e}")
             return False
