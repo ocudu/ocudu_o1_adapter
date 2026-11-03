@@ -394,6 +394,7 @@ class ConfigManager:
         ru_dummy_config = {}
         ru_sdr_config = {}
         e2_config: Dict[str, Any] = {}
+        du_config: Dict[str, Any] = {}
 
         managed_element = raw_config.get("data", {}).get("ManagedElement", {})
         for func_key, ext_key in (
@@ -431,6 +432,9 @@ class ConfigManager:
             # CU-CP when there is one (YANG 'when' removes them from DU/CU-UP), so a plain merge
             # yields the gNB 'e2' section.
             e2_config.update(ext.get("ocudu_e2_extensions") or {})
+            # The CU-UP has its own warn_on_drop (cu_up.warn_on_drop), so only the DU's maps to du.*.
+            if func_key == "GNBDUFunction" and "warn_on_drop" in ext:
+                du_config["warn_on_drop"] = ext["warn_on_drop"]
 
             if not log_config:
                 log = ext.get("ocudu_log_extensions")
@@ -476,6 +480,7 @@ class ConfigManager:
                 ru_dummy_config=ru_dummy_config,
                 ru_sdr_config=ru_sdr_config,
                 e2_config=e2_config,
+                du_config=du_config,
                 f1ap_config=f1ap_config,
                 f1u_config=f1u_config,
             )
