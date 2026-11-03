@@ -35,6 +35,7 @@ from netconf_to_yaml import (
 from remote_commands import WsRemoteCommands
 from ru_forwarder import RU_FORWARD_NODES
 from state import AppState
+from xml_utils import ensure_list
 
 # take_notification() blocks off the event loop and returns the instant ncclient
 # queues a server-pushed <notification>, so config changes are handled event-driven
@@ -272,6 +273,7 @@ class ConfigManager:
         pcap_config: Dict[str, Any] = {}
         ru_dummy_config = {}
         ru_sdr_config = {}
+        e2_config: Dict[str, Any] = {}
 
         managed_element = raw_config.get("data", {}).get("ManagedElement", {})
         for func_key, ext_key in (
@@ -305,6 +307,9 @@ class ConfigManager:
             ru_sdr = ext.get("ocudu_ru_sdr_extensions")
             if ru_sdr is not None:
                 ru_sdr_config = ru_sdr
+            # Each function brings its enable_*_e2 leaf; the shared RIC connection leaves exist
+            # on one function only (YANG 'when'), so a plain merge yields the gNB 'e2' section.
+            e2_config.update(ext.get("ocudu_e2_extensions") or {})
 
             if not log_config:
                 log = ext.get("ocudu_log_extensions")
@@ -321,6 +326,10 @@ class ConfigManager:
 
             pcap = ext.get("ocudu_pcap_extensions") or {}
             pcap_config.update(pcap)
+
+        for key in ("addrs", "bind_addrs"):
+            if key in e2_config:
+                e2_config[key] = "[" + ", ".join(ensure_list(e2_config[key])) + "]"
 
         # Render config file
         try:
@@ -344,6 +353,7 @@ class ConfigManager:
                 ntn_satellites=ntn_satellites,
                 ru_dummy_config=ru_dummy_config,
                 ru_sdr_config=ru_sdr_config,
+                e2_config=e2_config,
                 f1ap_config=f1ap_config,
                 f1u_config=f1u_config,
             )
