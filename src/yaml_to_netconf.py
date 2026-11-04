@@ -32,7 +32,8 @@ all -- pick the seed that matches the split. Covered so far:
   - the gNB identity: gnb_id / gnb_id_bit_length onto every function the YAML configures (the
     gnb-id-consistency deviation wants them equal), gnb_du_id, ran_node_name and gnb_cu_up_id onto
     their function
-  - GNBDUFunction: NRCellDU standard attributes (sector_id <-> cellLocalId included), all
+  - GNBDUFunction: NRCellDU standard attributes (sector_id <-> cellLocalId included; every cell
+    starts from cell_cfg, and a YAML with no cells list has the one cell cell_cfg describes), all
     ocudu_nrcelldu_* channel/base extensions, the per-cell OFH extension, RRMPolicyRatio (from
     cell_cfg), and the standalone DU's F1 endpoints: f1ap.addrs / bind_addrs -> EP_F1C remote /
     local address, f1u.socket[0].bind_addr -> EP_F1U local address, f1u.bind_port / peer_port -> the
@@ -328,9 +329,27 @@ def _ensure_list(value):
     return value if isinstance(value, list) else [value]
 
 
+def _inherit(defaults, cell):
+    """A cell's config on top of the defaults: dicts merge key by key, anything else replaces."""
+    if isinstance(defaults, dict) and isinstance(cell, dict):
+        merged = dict(defaults)
+        for key, value in cell.items():
+            merged[key] = _inherit(merged[key], value) if key in merged else value
+        return merged
+    return cell
+
+
+def _cells_with_defaults(yaml_cfg):
+    """The cells as the gNB reads them: every cells entry starts from cell_cfg, and a YAML with no
+    cells list has exactly one cell, cell_cfg itself. slicing stays out of the cells: it goes to the
+    RRM policies."""
+    defaults = {key: value for key, value in (yaml_cfg.get("cell_cfg") or {}).items() if key != "slicing"}
+    return [_inherit(defaults, cell or {}) for cell in yaml_cfg.get("cells") or [{}]]
+
+
 def overlay_du(yaml_cfg, gnbdu, written):
     """Overlay the DU portion of a srsRAN YAML config onto a scaffold GNBDUFunction element, in place."""
-    yaml_cells = yaml_cfg.get("cells") or []
+    yaml_cells = _cells_with_defaults(yaml_cfg)
     ofh_cells = (yaml_cfg.get("ru_ofh") or {}).get("cells") or []
     scaffold_cells = _ensure_list(gnbdu.get("NRCellDU"))
     if yaml_cells and not scaffold_cells:
@@ -348,12 +367,8 @@ def overlay_du(yaml_cfg, gnbdu, written):
         _overlay_cell(cell_xml, yaml_cell, ofh_cell, written)
         overlaid.append(cell_xml)
 
-    # Keep any scaffold cells beyond the YAML's cell count untouched. A cell_cfg-only YAML overlays no
-    # cell at all, in which case the scaffold's NRCellDU (if any) is left exactly as it is.
-    if overlaid:
-        gnbdu["NRCellDU"] = overlaid + scaffold_cells[len(overlaid) :]
-    elif scaffold_cells:
-        gnbdu["NRCellDU"] = scaffold_cells
+    # Keep any scaffold cells beyond the YAML's cell count untouched.
+    gnbdu["NRCellDU"] = overlaid + scaffold_cells[len(overlaid) :]
 
     # Only a cell_cfg that carries slicing keeps the RRM policies alive. The forward path renders the
     # whole cell_cfg block -- plmn, tac and the slicing list with its sched_cfg -- out of
