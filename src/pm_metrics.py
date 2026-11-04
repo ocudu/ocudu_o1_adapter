@@ -268,8 +268,11 @@ class PmMetrics:
         if not metrics:
             return
         for job_id, job in active_jobs.items():
+            # the 3GPP model wants at least one performanceMetrics entry, so a job that means
+            # "every metric" names the wildcard "*"; an empty list (a server that lets it
+            # through) means the same
             allowed = set(job.get("performanceMetrics") or [])
-            job_metrics = [m for m in metrics if m.get("name") in allowed] if allowed else metrics
+            job_metrics = metrics if not allowed or "*" in allowed else [m for m in metrics if m.get("name") in allowed]
             if not job_metrics:
                 continue
             if job.get("streamTarget"):
