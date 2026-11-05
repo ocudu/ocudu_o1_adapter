@@ -241,6 +241,29 @@ class VesMessages:
         )
         self._send_ves_message(msg)
 
+    def send_moi_attribute_value_changes(self, dn, new_values, old_values):
+        """Sends a stndDefined notifyMOIAttributeValueChanges (TS 28.532 ProvMnS) for the MOI at dn."""
+        me_dn = dn.split(",")[0]
+        current_time = datetime.datetime.now(tz=datetime.timezone.utc)
+        environment = Environment(loader=FileSystemLoader("templates/ves"))
+        template = environment.get_template("moi_attribute_value_changes.json")
+        msg = template.render(
+            eventId=f"{dn}_notifyMOIAttributeValueChanges_{self.sequence}",
+            sequence=self.sequence,
+            reportingEntityName=me_dn,
+            sourceName=me_dn.split("=", 1)[1],
+            timeStamp=int(current_time.timestamp() * 1000000),
+            nfNamingCode=self._NF_NAMING_CODE,
+            nfVendorName=self._NF_VENDOR,
+            href=f"http://{self.oam_ipv4_address}/{dn.replace(',', '/')}",
+            notificationId=self.sequence,
+            eventTime=current_time.isoformat(timespec="seconds"),
+            systemDN=me_dn,
+            newValues=new_values,
+            oldValues=old_values,
+        )
+        self._send_ves_message(msg)
+
     def _send_ves_message(self, msg):
         # one sequence number per event, delivered or not: the collector must
         # be able to tell events apart even across an outage on its side

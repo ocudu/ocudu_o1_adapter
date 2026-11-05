@@ -583,29 +583,46 @@ def extract_ssb_runtime_config(raw_config):
     return du_cell_config
 
 
-def extract_energy_saving_controls(raw_config):
-    """Map each NRCellCU's (plmn, nci) to its CESManagementFunction energySavingControl.
+def extract_energy_saving_cells(raw_config):
+    """Map each NRCellCU's (plmn, nci) to its CESManagementFunction energySavingControl and DNs.
 
-    Cells without a CESManagementFunction (or without energySavingControl) are left out.
+    Each value is {"control", "ces_dn", "du_dn"}; du_dn is the DN of the NRCellDU with the same
+    cellLocalId on this ManagedElement, or None (e.g. on a standalone CU-CP). Cells without a
+    CESManagementFunction (or without energySavingControl) are left out.
     """
     try:
-        nc_cucp = raw_config["data"]["ManagedElement"]["GNBCUCPFunction"]
+        me = raw_config["data"]["ManagedElement"]
+        nc_cucp = me["GNBCUCPFunction"]
         gnb_id = int(nc_cucp["attributes"]["gNBId"])
         cell_id_shift = 36 - int(nc_cucp["attributes"]["gNBIdLength"])
+        me_dn = f"ManagedElement={me['id']}"
     except (KeyError, TypeError):
         return {}
 
-    controls = {}
+    du_dns = {}
+    nc_du = me.get("GNBDUFunction")
+    if isinstance(nc_du, dict) and int(nc_du.get("attributes", {}).get("gNBId", -1)) == gnb_id:
+        for nrcelldu in get_du_cell_config(raw_config):
+            du_dns[int(nrcelldu["attributes"]["cellLocalId"])] = (
+                f"{me_dn},GNBDUFunction={nc_du['id']},NRCellDU={nrcelldu['id']}"
+            )
+
+    cells = {}
     for nrcellcu in ensure_list(nc_cucp.get("NRCellCU")):
         for ces in ensure_list(nrcellcu.get("CESManagementFunction")):
             control = (ces.get("attributes") or {}).get("energySavingControl")
             if control:
                 attrs = nrcellcu["attributes"]
                 plmn_info = ensure_list(attrs["pLMNInfoList"])[0]
-                nci = (gnb_id << cell_id_shift) | int(attrs["cellLocalId"])
-                controls[(plmn_info["mcc"] + plmn_info["mnc"], nci)] = control
+                local_id = int(attrs["cellLocalId"])
+                cells[(plmn_info["mcc"] + plmn_info["mnc"], (gnb_id << cell_id_shift) | local_id)] = {
+                    "control": control,
+                    "ces_dn": f"{me_dn},GNBCUCPFunction={nc_cucp['id']},NRCellCU={nrcellcu['id']},"
+                    f"CESManagementFunction={ces['id']}",
+                    "du_dn": du_dns.get(local_id),
+                }
                 break
-    return controls
+    return cells
 
 
 def extract_rrm_policy_ratio_config(raw_config):

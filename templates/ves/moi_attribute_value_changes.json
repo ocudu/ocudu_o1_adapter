@@ -1,0 +1,37 @@
+{
+    "event": {
+        "commonEventHeader": {
+            "domain": "stndDefined",
+            "eventId": "{{ eventId }}",
+            "eventName": "stndDefined_Provisioning_notifyMOIAttributeValueChanges",
+            "eventType": "Provisioning",
+            "sequence": {{ sequence }},
+            "priority": "Normal",
+            "reportingEntityId": "",
+            "reportingEntityName": "{{ reportingEntityName }}",
+            "sourceId": "",
+            "sourceName": "{{ sourceName }}",
+            "startEpochMicrosec": {{ timeStamp }},
+            "lastEpochMicrosec": {{ timeStamp }},
+            "nfNamingCode": "{{ nfNamingCode }}",
+            "nfVendorName": "{{ nfVendorName }}",
+            "timeZoneOffset": "+00:00",
+            "version": "4.1",
+            "stndDefinedNamespace": "3GPP-Provisioning",
+            "vesEventListenerVersion": "7.2.1"
+        },
+        "stndDefinedFields": {
+            "schemaReference": "https://forge.3gpp.org/rep/sa5/MnS/raw/Tag_Rel19_SA112/OpenAPI/TS28532_ProvMnS.yaml#/components/schemas/NotifyMoiAttributeValueChanges",
+            "data": {
+                "href": "{{ href }}",
+                "notificationId": {{ notificationId }},
+                "notificationType": "notifyMOIAttributeValueChanges",
+                "eventTime": "{{ eventTime }}",
+                "systemDN": "{{ systemDN }}",
+                "sourceIndicator": "RESOURCE_OPERATION",
+                "attributeListValueChanges": [{{ newValues | tojson }}, {{ oldValues | tojson }}]
+            },
+            "stndDefinedFieldsVersion": "1.0"
+        }
+    }
+}

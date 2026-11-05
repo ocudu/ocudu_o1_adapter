@@ -10,7 +10,7 @@ from typing import Any, Deque, Dict
 
 
 @dataclass()
-class AppState:
+class AppState:  # pylint: disable=too-many-instance-attributes
     """Simple class to state shared across tasks."""
 
     session_state = {
@@ -38,3 +38,4 @@ class AppState:
     )
 
     restart_req = False
+    ws_connects = 0  # WS sessions opened so far; a new one may face a restarted gNB

@@ -186,7 +186,7 @@ async def try_connect(args, alarm_mgr):
         return None
 
 
-async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
+async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None, ves_messages=None):
     """
     Main loop for managing the NETCONF connection.
     """
@@ -209,6 +209,7 @@ async def netconf_main(state: AppState, args, alarm_mgr, ru_forwarder=None):
                 args.template,
                 args.ru_forward,
                 profile=args.profile,
+                ves=ves_messages,
             )
             worker = asyncio.create_task(writer.run(stop_event))
             writer.write_full_config(None)
@@ -297,6 +298,7 @@ async def ws_handler(state: AppState, args, alarm_mgr, pm_metrics: PmMetrics):
             ) as ws:
                 logging.info("Connected to WebSocket server")
                 state.session_state["ws_connected"] = True
+                state.ws_connects += 1
                 alarm_mgr.clear_alarm(
                     AlarmId.REMOTE_CONTROL_CONNECTION_LOSS,
                     message="WS connection restored",
@@ -408,7 +410,7 @@ async def orchestrator(args, alarm_mgr, ves_messages):
     run_netconf_main, run_ws_handler = du_facing_loops_enabled(args.profile, ru_forwarder is not None)
 
     await asyncio.gather(
-        netconf_main(state, args, alarm_mgr, ru_forwarder) if run_netconf_main else asyncio.sleep(0),
+        netconf_main(state, args, alarm_mgr, ru_forwarder, ves_messages) if run_netconf_main else asyncio.sleep(0),
         ru_forwarder.run() if ru_forwarder else asyncio.sleep(0),
         mplane_session.run() if mplane_session else asyncio.sleep(0),
         ws_handler(state, args, alarm_mgr, pm_metrics) if run_ws_handler else asyncio.sleep(0),

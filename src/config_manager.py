@@ -14,6 +14,7 @@ import json
 import logging
 import xml.etree.ElementTree as ET
 from typing import Any, Dict
+from xml.sax.saxutils import escape
 
 import ncclient
 import xmltodict
@@ -27,7 +28,7 @@ from netconf_to_yaml import (
     extract_cells_config,
     extract_cucp_config,
     extract_cuup_config,
-    extract_energy_saving_controls,
+    extract_energy_saving_cells,
     extract_ntn_satellites,
     extract_perf_metric_jobs,
     extract_rrm_policy_ratio_config,
@@ -79,6 +80,7 @@ class ConfigManager:
         template_filename,
         ru_forward_enabled,
         profile="gnb",
+        ves=None,
     ):
         # execute the base constructor
         self.netconf_manager = netconf_manager
@@ -92,6 +94,8 @@ class ConfigManager:
         self._render_enabled = profile != "ru"
         self._profile = profile
         self._filter_xml = None
+        self._ves = ves
+        self._ws_connects_seen = 0
 
     def _build_filter_xml(self):
         """Subtree filter over ManagedElement (rendering profiles) and, with --ru_forward,
@@ -201,17 +205,18 @@ class ConfigManager:
 
         if "CESManagementFunction" in str(diff):
             await self._switch_energy_saving_cells(
-                extract_energy_saving_controls(self.last_config), extract_energy_saving_controls(raw_config)
+                extract_energy_saving_cells(self.last_config), extract_energy_saving_cells(raw_config)
             )
 
-    async def _switch_energy_saving_cells(self, old_controls, new_controls):
+    async def _switch_energy_saving_cells(self, old_cells, new_cells):
         """Switch off (toBeEnergySaving) or on every cell whose energySavingControl changed.
 
         A removed CESManagementFunction or energySavingControl counts as toBeNotEnergySaving.
         """
-        for plmn, nci in old_controls.keys() | new_controls.keys():
-            to_energy_saving = new_controls.get((plmn, nci)) == "toBeEnergySaving"
-            if to_energy_saving == (old_controls.get((plmn, nci)) == "toBeEnergySaving"):
+        for plmn, nci in old_cells.keys() | new_cells.keys():
+            new_cell = new_cells.get((plmn, nci))
+            to_energy_saving = (new_cell or {}).get("control") == "toBeEnergySaving"
+            if to_energy_saving == (old_cells.get((plmn, nci), {}).get("control") == "toBeEnergySaving"):
                 continue
             # ponytail: cell_lock/cell_unlock stand in for a CU-CP energy-saving switch-off/on, so
             # the switch shows as an admin lock; replace once the CU-CP has an energy-saving state.
@@ -221,22 +226,91 @@ class ConfigManager:
             try:
                 if "error" in await self._ws.request({"cmd": cmd, "cgi": cgi}):
                     continue
-                await self._wait_cell_switched(cgi, to_energy_saving)
+                target = ("locked", "disabled") if to_energy_saving else ("unlocked", "enabled")
+                await self._wait_cell_status(
+                    cgi, lambda r, t=target: (r.get("admin_state"), r.get("operational_state")) == t
+                )
             except (asyncio.TimeoutError, ConnectionError) as e:
                 logging.warning(f"Energy saving: {cmd} cell {cgi} failed: {e!r}")
+                continue
+            logging.info(f"Energy saving: cell {cgi} is {target[0]}/{target[1]}")
+            await self._report_energy_saving(new_cell, (new_cell or old_cells[(plmn, nci)])["du_dn"], to_energy_saving)
 
-    async def _wait_cell_switched(self, cgi, to_energy_saving):
-        """Poll cell_status until the CU-CP reports the cell switched off/on, or time out."""
-        target = ("locked", "disabled") if to_energy_saving else ("unlocked", "enabled")
+    async def _reapply_energy_saving(self):
+        """Switch the energy-saving cells off again on a new WS session: a restarted gNB brings them back up."""
+        cells = extract_energy_saving_cells(self.last_config)
+        for (plmn, nci), cell in cells.items():
+            if cell["control"] != "toBeEnergySaving":
+                continue
+            cgi = {"plmn": plmn, "nci": nci}
+            try:
+                # The gNB starts its remote server before F1 setup: wait until the CU-CP has the cell up.
+                status = await self._wait_cell_status(
+                    cgi, lambda r: r.get("admin_state") == "locked" or r.get("operational_state") == "enabled"
+                )
+            except (asyncio.TimeoutError, ConnectionError) as e:
+                logging.warning(f"Energy saving: cell {cgi} not back after reconnect: {e!r}")
+                continue
+            if status["admin_state"] != "locked":
+                await self._switch_energy_saving_cells({}, {(plmn, nci): cell})
+
+    async def _wait_cell_status(self, cgi, done):
+        """Poll cell_status until done(result) holds and return that result, or time out."""
         deadline = asyncio.get_running_loop().time() + self._CELL_SWITCH_TIMEOUT
         while True:
             result = (await self._ws.request({"cmd": "cell_status", "cgi": cgi})).get("result") or {}
-            if (result.get("admin_state"), result.get("operational_state")) == target:
-                logging.info(f"Energy saving: cell {cgi} is {target[0]}/{target[1]}")
-                return
+            if done(result):
+                return result
             if asyncio.get_running_loop().time() > deadline:
                 raise asyncio.TimeoutError(f"cell still {result}")
             await asyncio.sleep(1)
+
+    async def _report_energy_saving(self, cell, du_dn, to_energy_saving):
+        """Record energySavingState on the CES MOI and notify the SMO of it and of the NRCellDU cellState.
+
+        cell is None when the SMO deleted the CESManagementFunction; du_dn is None without a local NRCellDU.
+        """
+        es_states = (
+            ("isEnergySaving", "isNotEnergySaving") if to_energy_saving else ("isNotEnergySaving", "isEnergySaving")
+        )
+        cell_states = ("IDLE", "ACTIVE") if to_energy_saving else ("ACTIVE", "IDLE")
+        if cell:
+            me_id, cucp_id, cell_id, ces_id = [rdn.split("=", 1)[1] for rdn in cell["ces_dn"].split(",")]
+            # ponytail: energySavingState is config true in 3GPP, so it lives in the datastore the SMO
+            # also writes; a replace of the MOI drops it until the next switch. Serve it as state if that bites.
+            xml = f"""<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <ManagedElement xmlns="urn:3gpp:sa5:_3gpp-common-managed-element"><id>{escape(me_id)}</id>
+    <GNBCUCPFunction xmlns="urn:3gpp:sa5:_3gpp-nr-nrm-gnbcucpfunction"><id>{escape(cucp_id)}</id>
+      <NRCellCU xmlns="urn:3gpp:sa5:_3gpp-nr-nrm-nrcellcu"><id>{escape(cell_id)}</id>
+        <CESManagementFunction xmlns="urn:3gpp:sa5:_3gpp-nr-nrm-cesmanagementfunction"><id>{escape(ces_id)}</id>
+          <attributes><energySavingState>{es_states[0]}</energySavingState></attributes>
+        </CESManagementFunction>
+      </NRCellCU>
+    </GNBCUCPFunction>
+  </ManagedElement>
+</config>"""
+            try:
+                self.netconf_manager.edit_config(target=self.datastore, config=xml)
+            except (
+                ncclient.operations.RPCError,
+                ncclient.operations.OperationError,
+                ncclient.operations.TimeoutExpiredError,
+            ) as e:
+                logging.warning(f"Energy saving: failed to set energySavingState on {cell['ces_dn']}: {e}")
+            if self._ves:
+                await asyncio.to_thread(
+                    self._ves.send_moi_attribute_value_changes,
+                    cell["ces_dn"],
+                    {"energySavingState": es_states[0]},
+                    {"energySavingState": es_states[1]},
+                )
+        if du_dn and self._ves:
+            await asyncio.to_thread(
+                self._ves.send_moi_attribute_value_changes,
+                du_dn,
+                {"cellState": cell_states[0]},
+                {"cellState": cell_states[1]},
+            )
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     def write_full_config(self, raw_config, raw_xml=None):
@@ -455,6 +529,10 @@ class ConfigManager:
                 if not self.netconf_manager.connected:
                     logging.info("NETCONF session no longer connected (worker)")
                     break
+
+                if self.state.ws_connects != self._ws_connects_seen:
+                    self._ws_connects_seen = self.state.ws_connects
+                    await self._reapply_energy_saving()
 
                 # Wait for a notification on a worker thread so the event loop isn't
                 # blocked. A queued notification returns immediately; the tick timeout
