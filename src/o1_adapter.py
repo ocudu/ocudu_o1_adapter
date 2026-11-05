@@ -40,6 +40,7 @@ from password_files import read_password_files
 from pm_files import PmFiles
 from pm_metrics import PmMetrics
 from ptp_monitor import ptp_health_checker_consumer, ptp_log_monitor
+from remote_commands import fail_ws_replies, resolve_ws_reply
 from rpc_log import add_rpc_log_argument, enable_rpc_log
 from ru_config import ROLE_SUDO, ROLES
 from ru_fm_bridge import RuFaultBridge
@@ -236,6 +237,7 @@ async def _run_ws_session(ws, state: AppState, pm_metrics: PmMetrics):
     while not state.ws_send_queue.empty():
         state.ws_send_queue.get_nowait()
         state.ws_send_queue.task_done()
+    fail_ws_replies(state.ws_replies)
 
     # Subscribe to metrics
     state.ws_send_queue.put_nowait(json.dumps({"cmd": "metrics_subscribe"}))
@@ -254,6 +256,7 @@ async def _run_ws_session(ws, state: AppState, pm_metrics: PmMetrics):
     async def receiver():
         try:
             async for msg in ws:
+                resolve_ws_reply(state.ws_replies, msg)
                 await pm_metrics.handle_ws_message(msg)
         except websockets.exceptions.ConnectionClosed:
             return

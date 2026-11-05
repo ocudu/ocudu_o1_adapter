@@ -27,6 +27,7 @@ from netconf_to_yaml import (
     extract_cells_config,
     extract_cucp_config,
     extract_cuup_config,
+    extract_energy_saving_controls,
     extract_ntn_satellites,
     extract_perf_metric_jobs,
     extract_rrm_policy_ratio_config,
@@ -65,8 +66,9 @@ class ConfigManager:
         template_filename (str): The filename of the template used for rendering the configuration file.
     """
 
-    _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio", "PerfMetricJob"]
+    _RUNTIME_UPDATABLE_PARAMS = ["ssb_block_power_dbm", "RRMPolicyRatio", "PerfMetricJob", "CESManagementFunction"]
     _FULL_RESTART_TIMEOUT = 30
+    _CELL_SWITCH_TIMEOUT = 30  # seconds for a cell switch-off/on to complete
 
     def __init__(
         self,
@@ -85,7 +87,7 @@ class ConfigManager:
         self.template_filename = template_filename
         self.last_config = None
         self.state = state
-        self._ws = WsRemoteCommands(state.ws_send_queue)  # Inject shared WS send queue
+        self._ws = WsRemoteCommands(state.ws_send_queue, state.ws_replies)  # Inject shared WS queue/replies
         self._ru_forward_enabled = ru_forward_enabled
         self._render_enabled = profile != "ru"
         self._profile = profile
@@ -135,7 +137,8 @@ class ConfigManager:
         logging.debug(f"Config change detected: {diff}")
         try:
             for _, change in diff.items():
-                for key, _ in change.items():
+                # values_changed/type_changes map path -> change; *_item_added/removed are bare paths
+                for key in change.keys() if isinstance(change, dict) else change:
                     param_found = False
                     for item in self._RUNTIME_UPDATABLE_PARAMS:
                         if item in key:
@@ -151,7 +154,7 @@ class ConfigManager:
 
         if runtime_updatable:
             logging.debug("Only runtime updatable parameters changed, no need to restart application")
-            self.update_runtime_config(raw_config, diff)
+            await self.update_runtime_config(raw_config, diff)
             self.write_full_config(raw_config, raw_xml)
         else:
             logging.debug("Full restart needed, sending quit cmd")
@@ -175,7 +178,7 @@ class ConfigManager:
                     return
                 await asyncio.sleep(1)
 
-    def update_runtime_config(self, raw_config, diff):
+    async def update_runtime_config(self, raw_config, diff):
         """
         Updates the runtime configuration of the DU cell.
 
@@ -195,6 +198,45 @@ class ConfigManager:
 
             # Send update command
             self._ws.send_rrm_policy_ratio_command(rrm_policy_config)
+
+        if "CESManagementFunction" in str(diff):
+            await self._switch_energy_saving_cells(
+                extract_energy_saving_controls(self.last_config), extract_energy_saving_controls(raw_config)
+            )
+
+    async def _switch_energy_saving_cells(self, old_controls, new_controls):
+        """Switch off (toBeEnergySaving) or on every cell whose energySavingControl changed.
+
+        A removed CESManagementFunction or energySavingControl counts as toBeNotEnergySaving.
+        """
+        for plmn, nci in old_controls.keys() | new_controls.keys():
+            to_energy_saving = new_controls.get((plmn, nci)) == "toBeEnergySaving"
+            if to_energy_saving == (old_controls.get((plmn, nci)) == "toBeEnergySaving"):
+                continue
+            # ponytail: cell_lock/cell_unlock stand in for a CU-CP energy-saving switch-off/on, so
+            # the switch shows as an admin lock; replace once the CU-CP has an energy-saving state.
+            cmd = "cell_lock" if to_energy_saving else "cell_unlock"
+            cgi = {"plmn": plmn, "nci": nci}
+            logging.info(f"Energy saving: {cmd} cell {cgi}")
+            try:
+                if "error" in await self._ws.request({"cmd": cmd, "cgi": cgi}):
+                    continue
+                await self._wait_cell_switched(cgi, to_energy_saving)
+            except (asyncio.TimeoutError, ConnectionError) as e:
+                logging.warning(f"Energy saving: {cmd} cell {cgi} failed: {e!r}")
+
+    async def _wait_cell_switched(self, cgi, to_energy_saving):
+        """Poll cell_status until the CU-CP reports the cell switched off/on, or time out."""
+        target = ("locked", "disabled") if to_energy_saving else ("unlocked", "enabled")
+        deadline = asyncio.get_running_loop().time() + self._CELL_SWITCH_TIMEOUT
+        while True:
+            result = (await self._ws.request({"cmd": "cell_status", "cgi": cgi})).get("result") or {}
+            if (result.get("admin_state"), result.get("operational_state")) == target:
+                logging.info(f"Energy saving: cell {cgi} is {target[0]}/{target[1]}")
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise asyncio.TimeoutError(f"cell still {result}")
+            await asyncio.sleep(1)
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     def write_full_config(self, raw_config, raw_xml=None):

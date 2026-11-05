@@ -6,8 +6,38 @@
 This module provides a class `WsRemoteCommands` to handle remote commands via WebSocket.
 """
 
+import asyncio
 import json
-from typing import Any, Dict
+import logging
+from collections import deque
+from typing import Any, Deque, Dict
+
+WS_REPLY_TIMEOUT = 5  # seconds
+
+
+def resolve_ws_reply(replies: Dict[str, Deque[asyncio.Future]], msg: str):
+    """Hand a gNB command reply to the oldest request still waiting on that command."""
+    try:
+        data = json.loads(msg)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(data, dict):
+        return
+    waiting = replies.get(str(data.get("cmd")))
+    if waiting:
+        future = waiting.popleft()
+        # A timed-out request stays queued (cancelled), so a late reply still pops its own slot.
+        if not future.done():
+            future.set_result(data)
+
+
+def fail_ws_replies(replies: Dict[str, Deque[asyncio.Future]]):
+    """Fail every pending request: a new WS session never answers the previous session's commands."""
+    for waiting in replies.values():
+        for future in waiting:
+            if not future.done():
+                future.set_exception(ConnectionError("WS session restarted"))
+    replies.clear()
 
 
 # pylint: disable=too-few-public-methods
@@ -19,8 +49,9 @@ class WsRemoteCommands:
         ws_send_queue (queue): The WebSocket send queue.
     """
 
-    def __init__(self, ws_send_queue=None):
+    def __init__(self, ws_send_queue=None, ws_replies=None):
         self.send_queue = ws_send_queue
+        self.replies = ws_replies
 
     def send_ssb_command(self, ssb_cell_config) -> Any:
         """
@@ -62,6 +93,16 @@ class WsRemoteCommands:
     def send_metrics_subscribe(self) -> Any:
         """Request the gNB to (re-)emit its metric snapshot."""
         return self._send_ws_message({"cmd": "metrics_subscribe"})
+
+    async def request(self, command: Dict) -> dict:
+        """Send a command and return the gNB's reply; it carries "error" when the command failed."""
+        future: asyncio.Future[dict] = asyncio.get_running_loop().create_future()
+        self.replies.setdefault(command["cmd"], deque()).append(future)
+        self._send_ws_message(command)
+        reply = await asyncio.wait_for(future, WS_REPLY_TIMEOUT)
+        if "error" in reply:
+            logging.warning("gNB rejected %s: %s", command["cmd"], reply["error"])
+        return reply
 
     def _send_ws_message(self, command: Dict) -> Any:
         # Put quit command on WS queue and return

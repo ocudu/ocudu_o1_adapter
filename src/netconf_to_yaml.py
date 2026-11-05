@@ -583,6 +583,31 @@ def extract_ssb_runtime_config(raw_config):
     return du_cell_config
 
 
+def extract_energy_saving_controls(raw_config):
+    """Map each NRCellCU's (plmn, nci) to its CESManagementFunction energySavingControl.
+
+    Cells without a CESManagementFunction (or without energySavingControl) are left out.
+    """
+    try:
+        nc_cucp = raw_config["data"]["ManagedElement"]["GNBCUCPFunction"]
+        gnb_id = int(nc_cucp["attributes"]["gNBId"])
+        cell_id_shift = 36 - int(nc_cucp["attributes"]["gNBIdLength"])
+    except (KeyError, TypeError):
+        return {}
+
+    controls = {}
+    for nrcellcu in ensure_list(nc_cucp.get("NRCellCU")):
+        for ces in ensure_list(nrcellcu.get("CESManagementFunction")):
+            control = (ces.get("attributes") or {}).get("energySavingControl")
+            if control:
+                attrs = nrcellcu["attributes"]
+                plmn_info = ensure_list(attrs["pLMNInfoList"])[0]
+                nci = (gnb_id << cell_id_shift) | int(attrs["cellLocalId"])
+                controls[(plmn_info["mcc"] + plmn_info["mnc"], nci)] = control
+                break
+    return controls
+
+
 def extract_rrm_policy_ratio_config(raw_config):
     """Build the RRM policy ratio payload sent as a runtime update to the gNB."""
     cfg = {}

@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Deque, Dict
 
 
 @dataclass()
@@ -24,6 +24,8 @@ class AppState:
 
     ws_send_queue: asyncio.Queue[str] = asyncio.Queue()  # outgoing WS messages
     ws_received_queue: asyncio.Queue[dict] = asyncio.Queue()  # incoming WS messages
+    # cmd -> futures awaiting its reply, oldest first (the gNB answers each command in order)
+    ws_replies: Dict[str, Deque[asyncio.Future]] = field(default_factory=dict)
 
     ptp_stats_queue: asyncio.Queue[dict] = asyncio.Queue()  # PTP stats updates
 
