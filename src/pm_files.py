@@ -81,7 +81,7 @@ class PmFiles:
             return
         base = f"{job['nf_key']}={job['nf_id']}"
         for m in metrics:
-            # ponytail: cellId is the gNB cell id, not the NRCellDU id
+            # TODO: cellId is the gNB cell id, not the NRCellDU id
             ldn = base if m.get("cellId") is None else f"{base},NRCellDU={m['cellId']}"
             st["samples"].setdefault((ldn, m["name"]), []).append(m["value"])
 
@@ -117,7 +117,7 @@ class PmFiles:
                 st = self._jobs[jid]
                 if now >= st["period_end"]:
                     if st["samples"]:
-                        # ponytail: mean for all metrics, counters should be summed
+                        # TODO: mean for all metrics, counters should be summed
                         values = {k: fmean(v) for k, v in st["samples"].items()}
                         st["periods"].append((st["period_end"], values))
                     st["samples"] = {}

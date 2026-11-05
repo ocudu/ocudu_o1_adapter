@@ -218,7 +218,7 @@ class ConfigManager:
             to_energy_saving = (new_cell or {}).get("control") == "toBeEnergySaving"
             if to_energy_saving == (old_cells.get((plmn, nci), {}).get("control") == "toBeEnergySaving"):
                 continue
-            # ponytail: cell_lock/cell_unlock stand in for a CU-CP energy-saving switch-off/on, so
+            # TODO: cell_lock/cell_unlock stand in for a CU-CP energy-saving switch-off/on, so
             # the switch shows as an admin lock; replace once the CU-CP has an energy-saving state.
             cmd = "cell_lock" if to_energy_saving else "cell_unlock"
             cgi = {"plmn": plmn, "nci": nci}
@@ -276,7 +276,7 @@ class ConfigManager:
         cell_states = ("IDLE", "ACTIVE") if to_energy_saving else ("ACTIVE", "IDLE")
         if cell:
             me_id, cucp_id, cell_id, ces_id = [rdn.split("=", 1)[1] for rdn in cell["ces_dn"].split(",")]
-            # ponytail: energySavingState is config true in 3GPP, so it lives in the datastore the SMO
+            # TODO: energySavingState is config true in 3GPP, so it lives in the datastore the SMO
             # also writes; a replace of the MOI drops it until the next switch. Serve it as state if that bites.
             xml = f"""<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
   <ManagedElement xmlns="urn:3gpp:sa5:_3gpp-common-managed-element"><id>{escape(me_id)}</id>

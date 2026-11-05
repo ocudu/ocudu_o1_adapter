@@ -537,7 +537,7 @@ class RuConfig:  # pylint: disable=too-many-public-methods,too-many-instance-att
                 if not self.set_oran_perf_measurement({**pm_config, **groups}):
                     return {}
             except rpc_ops.RPCError as err:
-                # ponytail: TEMPERATURE (transceiver and epe) drops from both groups; match the error-path if it bites
+                # TODO: TEMPERATURE (transceiver and epe) drops from both groups; match the error-path if it bites
                 rejected = _measurement_objects_in_error(err, sorted({obj for objs in groups.values() for obj in objs}))
                 if not rejected:
                     raise
