@@ -34,8 +34,8 @@ all -- pick the seed that matches the split. Covered so far:
   - GNBCUCPFunction: the NG-C / E1 / F1-C endpoints, the flat amf.* knobs, and a tracking area's
     tac -> nRTAC, plmn -> pLMNId and tai_slice_support_list -> RRMPolicyRatio members
   - GNBCUUPFunction: the E1 / NG-U / F1-U endpoints (incl. the F1-U GTP-U ports) and test_mode
-  - the top-level log and pcap blocks, and the flat sections in _FLAT_SECTIONS (ru_sdr, ru_dummy, hal,
-    metrics, remote_control), all routed back to the function extension they came from
+  - the top-level log, pcap and metrics blocks, and the flat sections in _FLAT_SECTIONS (ru_sdr,
+    ru_dummy, hal, remote_control), all routed back to the function extension they came from
 
 cu_cp.mobility is the one section with a matching function that is still not inverted; it and the
 top-level sections in _UNINVERTED_SECTIONS are kept as the scaffold has them and reported.
@@ -70,12 +70,29 @@ _FLAT_SECTIONS = {
     "ru_sdr": "ocudu_ru_sdr_extensions",
     "ru_dummy": "ocudu_ru_dummy_extensions",
     "hal": "ocudu_hal_extensions",
-    "metrics": "ocudu_metrics_extensions",
     "remote_control": "ocudu_remote_control_extensions",
 }
 
 # Top-level YAML sections this module knows how to invert; anything else is reported and left alone.
-_HANDLED_SECTIONS = ("cells", "ru_ofh", "cell_cfg", "cu_cp", "cu_up", "log", "pcap") + tuple(_FLAT_SECTIONS)
+_HANDLED_SECTIONS = ("cells", "ru_ofh", "cell_cfg", "cu_cp", "cu_up", "log", "pcap", "metrics") + tuple(_FLAT_SECTIONS)
+
+# Every function declares ocudu_metrics_extensions, but each with its own periodicity and layer leaves
+# (metrics-extensions.yang), so the metrics block is routed leaf by leaf. Leaf names are unique across
+# the periodicity and layers containers, so a flat set per function is enough.
+_METRICS_COMMON_LEAVES = {"enable_json", "enable_log", "enable_app_usage"}
+_METRICS_FUNCTION_LEAVES = {
+    "GNBDUFunction": {
+        "autostart_stdout_metrics",
+        "du_report_period",
+        "enable_ru",
+        "enable_du_low",
+        "enable_sched",
+        "enable_mac",
+        "enable_rlc",
+    },
+    "GNBCUCPFunction": {"cu_cp_report_period", "enable_pdcp", "enable_rrc", "enable_ngap"},
+    "GNBCUUPFunction": {"cu_up_report_period", "enable_e1ap", "enable_pdcp"},
+}
 
 # cu_cp.amf keys that land on EP_NgC itself; the rest of the block mirrors its OCUDU extension.
 _AMF_ENDPOINT_KEYS = ("addrs", "bind_addrs", "supported_tracking_areas")
@@ -571,6 +588,50 @@ def _overlay_pcap(managed_element, pcap_cfg, written):
             _write(channel, leaf, text, written)
 
 
+def _filter_leaves(block, leaves):
+    """Return the part of a nested block whose leaf names are in `leaves`, dropping emptied containers."""
+    kept = {}
+    for key, value in block.items():
+        if isinstance(value, dict):
+            sub = _filter_leaves(value, leaves)
+            if sub:
+                kept[key] = sub
+        elif key in leaves:
+            kept[key] = value
+    return kept
+
+
+def _overlay_metrics(managed_element, metrics_cfg, written):
+    """Overlay the top-level metrics block onto the per-function ocudu_metrics_extensions.
+
+    The forward path merges the metrics of every function into one YAML block, so each leaf goes back
+    only to the functions whose YANG declares it: the common leaves to all of them, the rest per
+    _METRICS_FUNCTION_LEAVES (enable_pdcp to both CU-CP and CU-UP).
+    """
+    routed: set = set()
+    for func_key, ext_key in _FUNCTION_EXTENSIONS:
+        function = managed_element.get(func_key)
+        ext = function.get(ext_key) if isinstance(function, dict) else None
+        if not isinstance(ext, dict) or not isinstance(ext.get("ocudu_metrics_extensions"), dict):
+            continue
+        leaves = _METRICS_COMMON_LEAVES | _METRICS_FUNCTION_LEAVES[func_key]
+        block = _filter_leaves(metrics_cfg, leaves)
+        if block:
+            _merge(ext, "ocudu_metrics_extensions", block, written)
+            routed |= leaves
+
+    unrouted = []
+    stack = [metrics_cfg]
+    while stack:
+        for key, value in stack.pop().items():
+            if isinstance(value, dict):
+                stack.append(value)
+            elif key not in routed:
+                unrouted.append(key)
+    if unrouted:
+        logging.warning("Scaffold declares no ocudu_metrics_extensions that takes %s; dropping", ", ".join(unrouted))
+
+
 def _overlay_flat_sections(managed_element, yaml_cfg, written):
     """Overlay every _FLAT_SECTIONS block the YAML carries onto the container it mirrors.
 
@@ -712,6 +773,9 @@ def overlay(yaml_cfg, scaffold, minimal=True):
     if pcap_cfg:
         _overlay_pcap(managed_element, pcap_cfg, written)
         overlaid.append("pcap")
+    if yaml_cfg.get("metrics"):
+        _overlay_metrics(managed_element, yaml_cfg["metrics"], written)
+        overlaid.append("metrics")
     overlaid.extend(_overlay_flat_sections(managed_element, yaml_cfg, written))
 
     if not overlaid:
