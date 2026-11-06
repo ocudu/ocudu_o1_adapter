@@ -141,7 +141,15 @@ _ORBITAL_LEAVES = {
 
 def _flow_mapping(fields):
     """Render a dict as a YAML flow mapping so the template's 2-level loop can emit it."""
-    return "{" + ", ".join(f"{key}: {value}" for key, value in fields.items()) + "}"
+    return (
+        "{"
+        + ", ".join(
+            f"{key}: {_flow_mapping(value) if isinstance(value, dict) else value}"
+            for key, value in fields.items()
+            if not key.startswith("@")
+        )
+        + "}"
+    )
 
 
 def _ephemeris_arm(entry, leaves):
@@ -447,6 +455,15 @@ def extract_cells_config(raw_config):
                     continue
                 if key == "t_service":
                     ntn_fields[key] = _timestamp_to_unix_ms(value)
+                elif key == "sat_switch_with_resync":
+                    switch = dict(value)
+                    if "t_service_start" in switch:
+                        switch["t_service_start"] = _timestamp_to_unix_ms(switch["t_service_start"])
+                    ntn_fields[key] = _flow_mapping(switch)
+                elif key == "ncells":
+                    # The YANG list key (idx) only orders the entries; the gNB takes a plain list.
+                    ncells = [{k: v for k, v in ncell.items() if k != "idx"} for ncell in ensure_list(value)]
+                    ntn_fields[key] = "[" + ", ".join(_flow_mapping(ncell) for ncell in ncells) + "]"
                 else:
                     # Sub-containers (reference_location, polarization, feeder_link)
                     # -> YAML flow mapping so the template's 2-level loop renders them.
