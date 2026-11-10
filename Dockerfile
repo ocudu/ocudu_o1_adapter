@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 OCUDU contributors
 # SPDX-License-Identifier: BSD-3-Clause-Open-MPI
 
-FROM python:3.14-alpine
+FROM python:3.14.10-alpine3.24
 WORKDIR /usr/src/app
 RUN apk upgrade --no-cache
 COPY requirements.txt ./
