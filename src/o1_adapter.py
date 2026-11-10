@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import ssl
 import threading
 from contextlib import suppress
@@ -929,6 +930,10 @@ if __name__ == "__main__":
     # Let's go
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
+
+    # As a container's PID 1 the kernel drops signals without a handler, so SIGTERM would be
+    # ignored until the runtime's SIGKILL; stop on it the way Ctrl-C does.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
 
     try:
         # Run NETCONF + WebSocket together
