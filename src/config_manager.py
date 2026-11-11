@@ -39,6 +39,11 @@ from state import AppState
 # the stop event / connection state between notifications; it is not added latency.
 NOTIFICATION_TICK = 1  # seconds
 
+# Only ManagedElement is rendered into the application config. The rest of the running
+# datastore holds the netconf-server's keystore (cleartext private keys), its users and
+# NACM, which the adapter has no use for and must not hold or log.
+MANAGED_ELEMENT_FILTER = ("subtree", '<ManagedElement xmlns="urn:3gpp:sa5:_3gpp-common-managed-element"/>')
+
 
 # pylint: disable=too-many-instance-attributes,logging-fstring-interpolation,too-many-arguments,too-many-positional-arguments
 class ConfigManager:
@@ -79,11 +84,18 @@ class ConfigManager:
         self._render_enabled = profile != "ru"
         self._profile = profile
 
+    def _get_config_xml(self):
+        """Fetch the config the adapter works on: ManagedElement, or everything for the RU
+        profile, which forwards the O-RAN modules and filters them in ru_forwarder."""
+        if self._render_enabled:
+            return self.netconf_manager.get_config(source=self.datastore, filter=MANAGED_ELEMENT_FILTER).data_xml
+        return self.netconf_manager.get_config(source=self.datastore).data_xml
+
     async def process_config_update(self):
         """
         Retrieve full config
         """
-        raw_xml = self.netconf_manager.get_config(source=self.datastore).data_xml
+        raw_xml = self._get_config_xml()
         raw_config = xmltodict.parse(raw_xml)
 
         # Create diff between old and new config
@@ -174,10 +186,12 @@ class ConfigManager:
         """
         if raw_config is None:
             if raw_xml is None:
-                raw_xml = self.netconf_manager.get_config(source=self.datastore).data_xml
+                raw_xml = self._get_config_xml()
             raw_config = xmltodict.parse(raw_xml)
 
-        logging.debug(f"RAW xml:\n{raw_config}")
+        # The RU profile's unfiltered config includes the keystore.
+        if self._render_enabled:
+            logging.debug(f"RAW xml:\n{raw_config}")
 
         # Store config
         self.last_config = raw_config
