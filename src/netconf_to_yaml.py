@@ -36,9 +36,9 @@ def _timestamp_to_unix_ms(value):
     """Normalise a YANG timestamp leaf to Unix milliseconds as int.
 
     Used for every union(date-and-time, uint64) timestamp we forward: mobility t1_thres and the
-    NTN epochTime / t_service. The gNB's own ISO 8601 parser accepts no timezone designator and
-    assumes UTC, so an RFC 3339 value with a 'Z' or a numeric offset cannot be passed through
-    verbatim; Unix ms is the one encoding both sides read unambiguously.
+    NTN epochTime / t_service / t_service_start. The gNB's own ISO 8601 parser accepts no timezone
+    designator and assumes UTC, so an RFC 3339 value with a 'Z' or a numeric offset cannot be
+    passed through verbatim; Unix ms is the one encoding both sides read unambiguously.
     """
     text = str(value).strip()
     if text.lstrip("-").isdigit():
@@ -140,16 +140,21 @@ _ORBITAL_LEAVES = {
 
 
 def _flow_mapping(fields):
-    """Render a dict as a YAML flow mapping so the template's 2-level loop can emit it."""
-    return (
-        "{"
-        + ", ".join(
-            f"{key}: {_flow_mapping(value) if isinstance(value, dict) else value}"
-            for key, value in fields.items()
-            if not key.startswith("@")
-        )
-        + "}"
-    )
+    """Render a dict as a YAML flow mapping so the template's 2-level loop can emit it.
+
+    Recurses into nested containers, renders an empty (presence) container as {} and skips
+    xmltodict attributes such as @xmlns.
+    """
+    parts = []
+    for key, value in fields.items():
+        if key.startswith("@"):
+            continue
+        if isinstance(value, dict):
+            value = _flow_mapping(value)
+        elif value is None:  # xmltodict parses an empty container to None
+            value = "{}"
+        parts.append(f"{key}: {value}")
+    return "{" + ", ".join(parts) + "}"
 
 
 def _ephemeris_arm(entry, leaves):
@@ -461,13 +466,19 @@ def extract_cells_config(raw_config):
                         switch["t_service_start"] = _timestamp_to_unix_ms(switch["t_service_start"])
                     ntn_fields[key] = _flow_mapping(switch)
                 elif key == "ncells":
-                    # The YANG list key (idx) only orders the entries; the gNB takes a plain list.
-                    ncells = [{k: v for k, v in ncell.items() if k != "idx"} for ncell in ensure_list(value)]
+                    # idx sets the order of the neighbour list; the gNB takes a plain list without it.
+                    entries = sorted(ensure_list(value), key=lambda ncell: int(ncell["idx"]))
+                    ncells = [{k: v for k, v in ncell.items() if k != "idx"} for ncell in entries]
                     ntn_fields[key] = "[" + ", ".join(_flow_mapping(ncell) for ncell in ncells) + "]"
-                else:
-                    # Sub-containers (reference_location, polarization, feeder_link)
+                elif isinstance(value, dict):
+                    # Sub-containers (reference_location, moving_ref_location, polarization, feeder_link)
                     # -> YAML flow mapping so the template's 2-level loop renders them.
-                    ntn_fields[key] = _flow_mapping(value) if isinstance(value, dict) else value
+                    ntn_fields[key] = _flow_mapping(value)
+                elif value is None:
+                    # Empty presence container (e.g. <polarization/>): present for the gNB, with no fields.
+                    ntn_fields[key] = "{}"
+                else:
+                    ntn_fields[key] = value
             new_du_cell["ntn"] = ntn_fields
         except KeyError as e:
             logging.debug(f"No OCUDU NTN config extensions for this cell: {e}")
