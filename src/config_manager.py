@@ -11,12 +11,14 @@ rendering and RU forwarding.
 
 import asyncio
 import logging
+import xml.etree.ElementTree as ET
 from typing import Any, Dict
 
 import ncclient
 import xmltodict
 from deepdiff import DeepDiff
 from jinja2 import Environment, exceptions as jinja2_exceptions, FileSystemLoader
+from ncclient.xml_ import BASE_NS_1_0, to_ele
 
 from netconf_to_yaml import (
     active_job_ids,
@@ -31,6 +33,7 @@ from netconf_to_yaml import (
     extract_top_level_config,
 )
 from remote_commands import WsRemoteCommands
+from ru_forwarder import RU_FORWARD_NODES
 from state import AppState
 
 # take_notification() blocks off the event loop and returns the instant ncclient
@@ -39,10 +42,11 @@ from state import AppState
 # the stop event / connection state between notifications; it is not added latency.
 NOTIFICATION_TICK = 1  # seconds
 
-# Only ManagedElement is rendered into the application config. The rest of the running
-# datastore holds the netconf-server's keystore (cleartext private keys), its users and
-# NACM, which the adapter has no use for and must not hold or log.
-MANAGED_ELEMENT_FILTER = ("subtree", '<ManagedElement xmlns="urn:3gpp:sa5:_3gpp-common-managed-element"/>')
+# The adapter fetches only the nodes it renders (ManagedElement) or forwards to the RU.
+# The rest of the running datastore holds the netconf-server's keystore (cleartext
+# private keys), its users and NACM, which the adapter must not hold or log.
+MANAGED_ELEMENT_NODE = '<ManagedElement xmlns="urn:3gpp:sa5:_3gpp-common-managed-element"/>'
+YANG_LIBRARY_NS = "urn:ietf:params:xml:ns:yang:ietf-yang-library"
 
 
 # pylint: disable=too-many-instance-attributes,logging-fstring-interpolation,too-many-arguments,too-many-positional-arguments
@@ -83,17 +87,32 @@ class ConfigManager:
         self._ru_forward_enabled = ru_forward_enabled
         self._render_enabled = profile != "ru"
         self._profile = profile
+        self._filter_xml = None
+
+    def _build_filter_xml(self):
+        """Subtree filter over ManagedElement (rendering profiles) and, with --ru_forward,
+        the forwarded nodes whose module the server implements: netopeer2 rejects the
+        whole get-config if a filter node's module isn't installed."""
+        nodes = [MANAGED_ELEMENT_NODE] if self._render_enabled else []
+        if self._ru_forward_enabled:
+            library = self.netconf_manager.get(filter=("subtree", f'<yang-library xmlns="{YANG_LIBRARY_NS}"/>'))
+            implemented = {
+                module.findtext(f"{{{YANG_LIBRARY_NS}}}namespace")
+                for module in ET.fromstring(library.data_xml).iter(f"{{{YANG_LIBRARY_NS}}}module")
+            }
+            nodes += [f'<{node} xmlns="{ns}"/>' for ns, node in RU_FORWARD_NODES.items() if ns in implemented]
+        # A <filter> element rather than a ("subtree", ...) tuple, which takes a single root node.
+        return f'<filter xmlns="{BASE_NS_1_0}" type="subtree">{"".join(nodes)}</filter>'
 
     def _get_config_xml(self):
-        """Fetch the config the adapter works on: ManagedElement, or everything for the RU
-        profile, which forwards the O-RAN modules and filters them in ru_forwarder."""
-        if self._render_enabled:
-            return self.netconf_manager.get_config(source=self.datastore, filter=MANAGED_ELEMENT_FILTER).data_xml
-        return self.netconf_manager.get_config(source=self.datastore).data_xml
+        """Fetch the nodes the adapter renders or forwards."""
+        if self._filter_xml is None:
+            self._filter_xml = self._build_filter_xml()
+        return self.netconf_manager.get_config(source=self.datastore, filter=to_ele(self._filter_xml)).data_xml
 
     async def process_config_update(self):
         """
-        Retrieve full config
+        Retrieve the filtered config and apply changes
         """
         raw_xml = self._get_config_xml()
         raw_config = xmltodict.parse(raw_xml)
@@ -189,9 +208,7 @@ class ConfigManager:
                 raw_xml = self._get_config_xml()
             raw_config = xmltodict.parse(raw_xml)
 
-        # The RU profile's unfiltered config includes the keystore.
-        if self._render_enabled:
-            logging.debug(f"RAW xml:\n{raw_config}")
+        logging.debug(f"RAW xml:\n{raw_config}")
 
         # Store config
         self.last_config = raw_config

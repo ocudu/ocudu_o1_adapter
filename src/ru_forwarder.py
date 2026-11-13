@@ -32,6 +32,15 @@ SYNC_ALLOWED_NAMESPACES = {
     "urn:o-ran:uplane-conf:1.0",
 }
 
+# Top-level config nodes under SYNC_ALLOWED_NAMESPACES, by namespace. ConfigManager fetches only
+# these from the source server. o-ran-interfaces only augments ietf-interfaces' "interfaces".
+RU_FORWARD_NODES = {
+    "urn:ietf:params:xml:ns:yang:ietf-interfaces": "interfaces",
+    "urn:o-ran:performance-management:1.0": "performance-measurement-objects",
+    "urn:o-ran:processing-element:1.0": "processing-elements",
+    "urn:o-ran:uplane-conf:1.0": "user-plane-configuration",
+}
+
 
 class RuForwarder:
     """Handle RU NETCONF startup sync and forwarding of source NETCONF updates."""
