@@ -10,6 +10,7 @@ rendering and RU forwarding.
 """
 
 import asyncio
+import json
 import logging
 import xml.etree.ElementTree as ET
 from typing import Any, Dict
@@ -307,8 +308,9 @@ class ConfigManager:
             ru_sdr = ext.get("ocudu_ru_sdr_extensions")
             if ru_sdr is not None:
                 ru_sdr_config = ru_sdr
-            # Each function brings its enable_*_e2 leaf; the shared RIC connection leaves exist
-            # on one function only (YANG 'when'), so a plain merge yields the gNB 'e2' section.
+            # Each function brings its enable_*_e2 leaf; the shared RIC connection leaves sit on the
+            # CU-CP when there is one (YANG 'when' removes them from DU/CU-UP), so a plain merge
+            # yields the gNB 'e2' section.
             e2_config.update(ext.get("ocudu_e2_extensions") or {})
 
             if not log_config:
@@ -329,7 +331,8 @@ class ConfigManager:
 
         for key in ("addrs", "bind_addrs"):
             if key in e2_config:
-                e2_config[key] = "[" + ", ".join(ensure_list(e2_config[key])) + "]"
+                # Quoted: PyYAML cannot parse a plain '::1' inside a flow sequence.
+                e2_config[key] = json.dumps(ensure_list(e2_config[key]))
 
         # Render config file
         try:

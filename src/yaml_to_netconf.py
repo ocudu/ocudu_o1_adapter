@@ -109,6 +109,7 @@ _UNINVERTED_SECTIONS = {
     "f1ap": "EP_F1C",
     "f1u": "EP_F1U",
     "test_mode": "ocudu_gnbdufunction_testmode_extensions",
+    "e2": "ocudu_e2_extensions",
 }
 
 # Everything the OCUDU YANG augmentations add is named with this prefix, which is what lets minimal
