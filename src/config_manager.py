@@ -219,7 +219,8 @@ class ConfigManager:
             if to_energy_saving == (old_cells.get((plmn, nci), {}).get("control") == "toBeEnergySaving"):
                 continue
             # TODO: cell_lock/cell_unlock stand in for a CU-CP energy-saving switch-off/on, so
-            # the switch shows as an admin lock; replace once the CU-CP has an energy-saving state.
+            # the switch shows as an admin lock, and switch-on also unlocks a cell another remote-control
+            # client locked; replace once the CU-CP has an energy-saving state (ocudu/ocudu#995, #996).
             cmd = "cell_lock" if to_energy_saving else "cell_unlock"
             cgi = {"plmn": plmn, "nci": nci}
             logging.info(f"Energy saving: {cmd} cell {cgi}")
@@ -304,6 +305,8 @@ class ConfigManager:
                     {"energySavingState": es_states[0]},
                     {"energySavingState": es_states[1]},
                 )
+        # TODO: in a CU-DU split the NRCellDU belongs to the DU's adapter, so no cellState goes out;
+        # report it from the DU's adapter once the DU metrics carry the cell state (ocudu/ocudu#998).
         if du_dn and self._ves:
             await asyncio.to_thread(
                 self._ves.send_moi_attribute_value_changes,
