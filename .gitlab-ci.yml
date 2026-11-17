@@ -32,6 +32,9 @@ include:
     inputs:
       ocudu_path: $[[ inputs.ocudu_path ]]
       ocudu_ref: $[[ inputs.ocudu_ref ]]
+  - local: .gitlab/ci/ai.yml
+    rules:
+      - if: $OCUDU_TOOLS_PROJECT  # CI/CD variable; unset: no AI jobs
 
 variables:
   OCUDU_REGISTRY_URI: ${CI_TEMPLATE_REGISTRY_HOST}/$[[ inputs.ocudu_path ]]
